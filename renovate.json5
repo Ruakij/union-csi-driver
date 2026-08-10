@@ -7,7 +7,17 @@
   labels: ["dependencies"],
   // One line, no body: same rule as hand-written commits.
   commitMessageTopic: "{{depName}}",
+  // Base images are pinned by digest and Renovate keeps those fresh, which is the
+  // guarantee the mergerfs tarball cannot have.
+  pinDigests: true,
   packageRules: [
+    {
+      // The go directive and the golang image must move together: a toolchain
+      // older than the directive does not build.
+      matchDatasources: ["golang-version", "docker"],
+      matchPackageNames: ["go", "golang"],
+      groupName: "go toolchain",
+    },
     {
       matchManagers: ["gomod"],
       matchUpdateTypes: ["minor", "patch"],
