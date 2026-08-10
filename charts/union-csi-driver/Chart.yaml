@@ -1,6 +1,6 @@
 apiVersion: v2
 name: union-csi-driver
-description: CSI driver that unions a pod's sibling volumes into one merged mount
+description: overlayfs and mergerfs CSI driver - unions a pod's sibling volumes into one merged mount
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
@@ -12,7 +12,13 @@ keywords:
   - csi
   - storage
   - overlayfs
+  - overlay
   - mergerfs
+  - fuse
+  - union
+  - unionfs
+  - merge
+  - ephemeral
 annotations:
   artifacthub.io/category: storage
   artifacthub.io/license: Apache-2.0
