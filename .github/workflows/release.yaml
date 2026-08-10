@@ -45,10 +45,21 @@ jobs:
         with:
           fetch-depth: 0
       - uses: azure/setup-helm@v4
+      # The tag is the single source of truth. Without this the chart would ship
+      # an appVersion, and therefore a default image tag, that was never pushed.
+      - name: Stamp the chart with the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version: .*/version: ${version}/" charts/union-csi-driver/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${version}\"/" charts/union-csi-driver/Chart.yaml
+          helm lint charts/union-csi-driver
       - run: |
           git config user.name "${GITHUB_ACTOR}"
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-      - uses: helm/chart-releaser-action@v1
+      # Prereleases go to the OCI registry only: the index on gh-pages is what
+      # `helm repo add` resolves, and it should list stable versions.
+      - if: ${{ !contains(github.ref_name, '-') }}
+        uses: helm/chart-releaser-action@v1
         with:
           charts_dir: charts
         env:
