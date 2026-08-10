@@ -15,6 +15,7 @@ type Config struct {
 	Endpoint      string
 
 	KubeletRoot      string
+	StateDir         string
 	PublishTimeout   time.Duration
 	MaxSourceVolumes int
 

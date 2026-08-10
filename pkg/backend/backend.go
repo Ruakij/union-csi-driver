@@ -86,6 +86,16 @@ type Backend interface {
 	Unmount(ctx context.Context, volumeID, target string) error
 }
 
+// Runner is optionally implemented by backends that keep node-local state and
+// need a background maintenance loop. The driver calls Init once before serving,
+// and Run in its own goroutine for the process lifetime.
+type Runner interface {
+	// Init prepares the backend to keep its state under stateDir.
+	Init(stateDir string) error
+	// Run blocks until ctx is done.
+	Run(ctx context.Context)
+}
+
 // registry of compiled-in backend constructors, populated by each backend
 // package's init().
 var registry = map[string]func() Backend{}

@@ -1,10 +1,9 @@
 // Package mergerfs implements the mergerfs (FUSE) backend.
-//
-// TODO: reconcile loop repairing dead FUSE mounts where host systemd is absent.
 package mergerfs
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
@@ -13,7 +12,9 @@ func init() {
 	backend.Register("mergerfs", New)
 }
 
-type mergerfsBackend struct{}
+type mergerfsBackend struct {
+	stateDir string
+}
 
 // New constructs the mergerfs backend.
 func New() backend.Backend {
@@ -71,10 +72,27 @@ func (b *mergerfsBackend) MaxWritable() int {
 	return 0
 }
 
+// Init records where per-volume state lives. Every mount writes its branch list
+// and options there, because a restarted driver cannot recover them from
+// mountinfo and would otherwise have no way to repair a dead FUSE mount.
+func (b *mergerfsBackend) Init(stateDir string) error {
+	if stateDir == "" {
+		return errors.New("mergerfs: no state directory configured")
+	}
+	b.stateDir = stateDir
+	return nil
+}
+
+// Run keeps mounts alive on nodes where the daemon could not be handed to host
+// systemd. It returns immediately everywhere else.
+func (b *mergerfsBackend) Run(ctx context.Context) {
+	reconcile(ctx, b.stateDir)
+}
+
 func (b *mergerfsBackend) Mount(ctx context.Context, spec backend.MountSpec) error {
-	return mountUnion(ctx, spec)
+	return mountUnion(ctx, spec, b.stateDir)
 }
 
 func (b *mergerfsBackend) Unmount(ctx context.Context, volumeID, target string) error {
-	return unmountUnion(ctx, volumeID, target)
+	return unmountUnion(ctx, volumeID, target, b.stateDir)
 }

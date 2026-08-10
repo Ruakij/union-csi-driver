@@ -25,18 +25,35 @@ const (
 
 	mountWaitTimeout  = 30 * time.Second
 	mountPollInterval = 100 * time.Millisecond
+	reconcileInterval = 30 * time.Second
 
 	// fuseSuperMagic identifies a FUSE mount in statfs, which is what confirms
 	// mergerfs actually took over the target rather than merely starting.
 	fuseSuperMagic = 0x65735546
 )
 
-func mountUnion(ctx context.Context, spec backend.MountSpec) error {
+func mountUnion(ctx context.Context, spec backend.MountSpec, stateDir string) error {
 	argv, err := buildArgv(spec)
 	if err != nil {
 		return err
 	}
 
+	// Written before the daemon starts: a crash between the two leaves a state
+	// file for a mount that never came up, which the reconcile loop repairs. The
+	// reverse order would leave a live mount nothing knows how to repair.
+	if err := saveState(stateDir, volumeState{VolumeID: spec.VolumeID, Target: spec.Target, Argv: argv}); err != nil {
+		return err
+	}
+
+	if err := startDaemon(ctx, spec.VolumeID, spec.Target, argv); err != nil {
+		_ = removeState(stateDir, spec.VolumeID)
+		return err
+	}
+	return nil
+}
+
+// startDaemon launches mergerfs and returns once the target is a live FUSE mount.
+func startDaemon(ctx context.Context, volumeID, target string, argv []string) error {
 	cmd := exec.Command(mergerfsBinary, argv...)
 	// A new session detaches the daemon from the driver's controlling terminal and
 	// signal group, so a driver shutdown does not take the mount with it.
@@ -51,28 +68,28 @@ func mountUnion(ctx context.Context, spec backend.MountSpec) error {
 	go func() { exited <- cmd.Wait() }()
 
 	if systemdAvailable() {
-		if err := adoptIntoScope(ctx, scopeUnitName(spec.VolumeID), cmd.Process.Pid); err != nil {
+		if err := adoptIntoScope(ctx, scopeUnitName(volumeID), cmd.Process.Pid); err != nil {
 			_ = cmd.Process.Kill()
 			return err
 		}
 	}
 
-	if err := waitMounted(ctx, spec.Target, exited); err != nil {
+	if err := waitMounted(ctx, target, exited); err != nil {
 		_ = cmd.Process.Kill()
 		return err
 	}
-	klog.V(4).Infof("mergerfs: mounted %s (pid %d)", spec.Target, cmd.Process.Pid)
+	klog.V(4).Infof("mergerfs: mounted %s (pid %d)", target, cmd.Process.Pid)
 	return nil
 }
 
-func unmountUnion(ctx context.Context, volumeID, target string) error {
+func unmountUnion(ctx context.Context, volumeID, target, stateDir string) error {
 	if err := fuseUnmount(target); err != nil {
 		return err
 	}
 	if systemdAvailable() {
 		stopScope(ctx, scopeUnitName(volumeID))
 	}
-	return nil
+	return removeState(stateDir, volumeID)
 }
 
 // systemdAvailable probes the host service manager once. Without it the daemon

@@ -5,6 +5,7 @@
 package driver
 
 import (
+	"context"
 	"errors"
 	"os"
 
@@ -12,6 +13,7 @@ import (
 	"k8s.io/klog/v2"
 	mount "k8s.io/mount-utils"
 
+	"github.com/Ruakij/union-csi-driver/pkg/backend"
 	"github.com/Ruakij/union-csi-driver/pkg/volsource"
 )
 
@@ -50,6 +52,12 @@ func New(cfg Config) (*Driver, error) {
 	klog.Infof("Version: %s", cfg.VendorVersion)
 	klog.Infof("Backend: %s", cfg.Backend.Name())
 
+	if runner, ok := cfg.Backend.(backend.Runner); ok {
+		if err := runner.Init(cfg.StateDir); err != nil {
+			return nil, err
+		}
+	}
+
 	return &Driver{
 		config:   cfg,
 		resolver: volsource.NewResolver(cfg.KubeClient, cfg.KubeletRoot, cfg.DriverName),
@@ -57,8 +65,15 @@ func New(cfg Config) (*Driver, error) {
 	}, nil
 }
 
-// Run starts the gRPC server and blocks until stopCh fires.
+// Run starts the gRPC server and the backend's maintenance loop, if it has one,
+// and blocks until stopCh fires.
 func (d *Driver) Run(stopCh <-chan os.Signal) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if runner, ok := d.config.Backend.(backend.Runner); ok {
+		go runner.Run(ctx)
+	}
+
 	s := newNonBlockingGRPCServer()
 	s.Start(d.config.Endpoint, d, d)
 	<-stopCh

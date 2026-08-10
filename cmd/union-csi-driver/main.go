@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -91,6 +92,7 @@ func main() {
 	flag.StringVar(&cfg.NodeID, "nodeid", "", "node id")
 	flag.StringVar(&backendName, "backend", "", fmt.Sprintf("merge backend to run (%s)", strings.Join(backend.Names(), ", ")))
 	flag.StringVar(&cfg.KubeletRoot, "kubelet-root", "/var/lib/kubelet", "path to the kubelet directory on this node")
+	flag.StringVar(&cfg.StateDir, "state-dir", "", "where the backend keeps per-volume node state (default: \"<kubelet-root>/plugins/<drivername>/state\")")
 	flag.DurationVar(&cfg.PublishTimeout, "publish-timeout", 30*time.Second, "how long NodePublishVolume waits for sibling volumes to become ready")
 	flag.IntVar(&cfg.MaxSourceVolumes, "max-source-volumes", 32, "maximum number of sourceVolumes entries accepted per volume")
 
@@ -143,6 +145,11 @@ func main() {
 
 	if cfg.DriverName == "" {
 		cfg.DriverName = backendName + ".csi.example.io"
+	}
+	if cfg.StateDir == "" {
+		// Alongside the plugin socket, which is already a hostPath the DaemonSet
+		// mounts, so state outlives the pod without another volume.
+		cfg.StateDir = filepath.Join(cfg.KubeletRoot, "plugins", cfg.DriverName, "state")
 	}
 
 	// Fall back to the backend's own defaults only for flags the admin left alone,
