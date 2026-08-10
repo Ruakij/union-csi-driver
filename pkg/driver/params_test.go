@@ -22,7 +22,7 @@ func (b *fakeBackend) MaxWritable() int                               { return b
 func (b *fakeBackend) DefaultOptions() map[string]string              { return nil }
 func (b *fakeBackend) DefaultDenylist() []string                      { return nil }
 func (b *fakeBackend) Mount(context.Context, backend.MountSpec) error { return nil }
-func (b *fakeBackend) Unmount(context.Context, string) error          { return nil }
+func (b *fakeBackend) Unmount(context.Context, string, string) error  { return nil }
 
 func newTestDriver(maxSourceVolumes int, be backend.Backend) *Driver {
 	return &Driver{config: Config{MaxSourceVolumes: maxSourceVolumes, Backend: be}}

@@ -74,6 +74,6 @@ func (b *overlayBackend) Mount(ctx context.Context, spec backend.MountSpec) erro
 	return mountUnion(spec, b.Schema())
 }
 
-func (b *overlayBackend) Unmount(ctx context.Context, target string) error {
+func (b *overlayBackend) Unmount(ctx context.Context, volumeID, target string) error {
 	return unmountUnion(target)
 }

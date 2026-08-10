@@ -49,6 +49,9 @@ type Source struct {
 // ordered leftmost-wins on lookup. All paths are driver-resolved; Options have
 // already passed through the policy engine.
 type MountSpec struct {
+	// VolumeID is the CSI volume ID, used by backends that need a stable name for
+	// per-volume host state (mergerfs names its systemd scope after it).
+	VolumeID string
 	Target   string
 	Sources  []Source
 	Options  map[string]string
@@ -80,7 +83,7 @@ type Backend interface {
 	Mount(ctx context.Context, spec MountSpec) error
 	// Unmount tears down a mount previously created by Mount. Must tolerate the
 	// target already being unmounted.
-	Unmount(ctx context.Context, target string) error
+	Unmount(ctx context.Context, volumeID, target string) error
 }
 
 // registry of compiled-in backend constructors, populated by each backend

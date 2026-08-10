@@ -77,6 +77,6 @@ func (b *mergerfsBackend) Mount(ctx context.Context, spec backend.MountSpec) err
 	return errors.New("mergerfs backend not implemented yet")
 }
 
-func (b *mergerfsBackend) Unmount(ctx context.Context, target string) error {
+func (b *mergerfsBackend) Unmount(ctx context.Context, volumeID, target string) error {
 	return errors.New("mergerfs backend not implemented yet")
 }

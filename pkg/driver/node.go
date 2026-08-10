@@ -95,6 +95,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 
 	spec := backend.MountSpec{
+		VolumeID: req.GetVolumeId(),
 		Target:   req.GetTargetPath(),
 		Sources:  sources,
 		Options:  options,
@@ -117,7 +118,7 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 		return nil, status.Error(codes.InvalidArgument, "target path missing in request")
 	}
 
-	if err := d.config.Backend.Unmount(ctx, req.GetTargetPath()); err != nil {
+	if err := d.config.Backend.Unmount(ctx, req.GetVolumeId(), req.GetTargetPath()); err != nil {
 		return nil, status.Errorf(codes.Internal, "unmount: %v", err)
 	}
 	if err := os.RemoveAll(req.GetTargetPath()); err != nil {
