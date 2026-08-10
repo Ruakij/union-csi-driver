@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>union-csi-driver Helm repository</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 46rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.6; }
+  pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; border-radius: 6px; }
+  code { font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<h1>union-csi-driver</h1>
+<p>Helm chart repository for
+<a href="https://github.com/Ruakij/union-csi-driver">union-csi-driver</a>, a Kubernetes
+CSI driver that unions a pod's sibling volumes into one merged mount via overlayfs or
+mergerfs.</p>
+
+<pre><code>helm repo add union-csi https://ruakij.github.io/union-csi-driver
+helm repo update
+helm install mergerfs-csi union-csi/union-csi-driver --set backend=mergerfs</code></pre>
+
+<p>Charts are also published as OCI artifacts at
+<code>oci://ghcr.io/ruakij/charts/union-csi-driver</code>, which is where prereleases go.
+The index here lists stable releases only.</p>
+
+<p>See the <a href="https://github.com/Ruakij/union-csi-driver#readme">README</a> for
+configuration and the differences between the two backends.</p>
+</body>
+</html>
