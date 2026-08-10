@@ -55,11 +55,11 @@ jobs:
       # an appVersion, and therefore a default image tag, that was never pushed.
       - name: Stamp the chart with the tag
         run: |
-          # Helm rejects a v prefix on version; appVersion keeps it because that is
-          # the image tag.
+          # Helm rejects a v prefix on version; appVersion must match the image tag
+          # exactly (docker/metadata-action uses type=semver, which strips the v).
           version="${GITHUB_REF_NAME#v}"
           sed -i "s/^version: .*/version: ${version}/" charts/union-csi-driver/Chart.yaml
-          sed -i "s/^appVersion: .*/appVersion: \"v${version}\"/" charts/union-csi-driver/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${version}\"/" charts/union-csi-driver/Chart.yaml
           helm lint charts/union-csi-driver
       - run: |
           git config user.name "${GITHUB_ACTOR}"
