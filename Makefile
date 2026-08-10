@@ -17,8 +17,8 @@ all: build
 
 include release-tools/build.make
 
-# Refresh hack/mergerfs.pin, which the image build verifies against. Nothing bumps
-# this automatically; the upstream-sync workflow opens a PR when it lags upstream.
+# Refresh hack/mergerfs.pin, which the image build verifies against. The upstream-sync
+# workflow runs this and opens a PR when the pin lags upstream.
 MERGERFS_VERSION ?= $(shell sed -n 's/^version=//p' hack/mergerfs.pin)
 MERGERFS_URL = https://github.com/trapexit/mergerfs/releases/download/$(MERGERFS_VERSION)
 
@@ -29,7 +29,7 @@ update-mergerfs:
 	trap 'rm -rf "$$tmp"' EXIT; \
 	{ \
 	  echo '# Pinned upstream mergerfs static build, consumed by the Dockerfile.'; \
-	  echo '# Not updated automatically; see the upstream-sync workflow.'; \
+	  echo '# The upstream-sync workflow regenerates this weekly and opens a PR.'; \
 	  echo '# Refresh both with: make update-mergerfs [MERGERFS_VERSION=x.y.z]'; \
 	  echo 'version=$(MERGERFS_VERSION)'; \
 	} > $$tmp/pin; \
