@@ -1,0 +1,6 @@
+# Pinned upstream mergerfs static build, consumed by the Dockerfile.
+# Renovate bumps version here; the digests are not automatic.
+# Refresh both with: make update-mergerfs [MERGERFS_VERSION=x.y.z]
+version=2.42.0
+amd64=0cf8692e1687c8a1140c714966c6f5f4b498a1537f1a0bef5665082ecb35fc12
+arm64=da318afbf109f025a41e9be86de5ebbdfb879546abf4cb5176c8c15881b7cf05

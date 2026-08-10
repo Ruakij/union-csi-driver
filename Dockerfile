@@ -28,16 +28,15 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
 # digest because it is fetched from outside the package manager.
 FROM alpine AS mergerfs
 ARG TARGETARCH
-ARG MERGERFS_VERSION=2.42.0
+COPY hack/mergerfs.pin /tmp/mergerfs.pin
 RUN set -eu; \
-    case "${TARGETARCH}" in \
-      amd64) sha=0cf8692e1687c8a1140c714966c6f5f4b498a1537f1a0bef5665082ecb35fc12 ;; \
-      arm64) sha=da318afbf109f025a41e9be86de5ebbdfb879546abf4cb5176c8c15881b7cf05 ;; \
-      *) echo "no mergerfs static build pinned for ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
+    version=$(sed -n 's/^version=//p' /tmp/mergerfs.pin); \
+    sha=$(sed -n "s/^${TARGETARCH}=//p" /tmp/mergerfs.pin); \
+    [ -n "${version}" ] && [ -n "${sha}" ] || \
+      { echo "no mergerfs build pinned for ${TARGETARCH}, run make update-mergerfs" >&2; exit 1; }; \
     apk add --no-cache curl; \
     curl -fsSL -o /tmp/mergerfs.tar.gz \
-      "https://github.com/trapexit/mergerfs/releases/download/${MERGERFS_VERSION}/mergerfs-${MERGERFS_VERSION}-static-linux_${TARGETARCH}.tar.gz"; \
+      "https://github.com/trapexit/mergerfs/releases/download/${version}/mergerfs-${version}-static-linux_${TARGETARCH}.tar.gz"; \
     echo "${sha}  /tmp/mergerfs.tar.gz" | sha256sum -c -; \
     mkdir /mergerfs; \
     tar -xzf /tmp/mergerfs.tar.gz -C /mergerfs

@@ -1,0 +1,44 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: [
+    "config:recommended",
+    ":semanticCommitsDisabled",
+  ],
+  labels: ["dependencies"],
+  // One line, no body: same rule as hand-written commits.
+  commitMessageTopic: "{{depName}}",
+  packageRules: [
+    {
+      matchManagers: ["gomod"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "go dependencies",
+    },
+    {
+      // The k8s libraries are released in lockstep and do not compile against
+      // mismatched versions of each other.
+      matchManagers: ["gomod"],
+      matchPackageNames: ["k8s.io/**", "sigs.k8s.io/**"],
+      groupName: "kubernetes libraries",
+    },
+    {
+      matchManagers: ["github-actions"],
+      groupName: "github actions",
+    },
+    {
+      matchDepNames: ["trapexit/mergerfs"],
+      prBodyNotes: [
+        "The pinned sha256 digests in `hack/mergerfs.pin` are **not** updated automatically. Run `make update-mergerfs` on this branch, otherwise the image build fails its checksum check.",
+      ],
+    },
+  ],
+  customManagers: [
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^hack/mergerfs\\.pin$/"],
+      matchStrings: ["version=(?<currentValue>\\S+)"],
+      datasourceTemplate: "github-releases",
+      depNameTemplate: "trapexit/mergerfs",
+      versioningTemplate: "loose",
+    },
+  ],
+}

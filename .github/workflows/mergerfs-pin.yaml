@@ -1,0 +1,29 @@
+# Renovate can bump the mergerfs version in hack/mergerfs.pin but cannot compute
+# the release-asset digests next to it, so this refreshes them on its branch.
+name: mergerfs-pin
+
+on:
+  push:
+    branches: ["renovate/**"]
+    paths: ["hack/mergerfs.pin"]
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make update-mergerfs
+      - id: pin
+        run: git diff --quiet hack/mergerfs.pin || echo "changed=true" >> "$GITHUB_OUTPUT"
+      - if: steps.pin.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Refresh the mergerfs digests for this version" hack/mergerfs.pin
+          git push
+      # A push made with GITHUB_TOKEN does not start another workflow run, so
+      # prove the refreshed pin builds here rather than waiting for CI to say so.
+      - run: docker build --target mergerfs .
