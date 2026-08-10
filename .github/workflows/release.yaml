@@ -73,7 +73,11 @@ jobs:
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Push chart to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password "${{ secrets.GITHUB_TOKEN }}"
+          # OCI references must be lowercase, and the owner login is not.
+          owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin <<<"${GITHUB_TOKEN}"
           helm package charts/union-csi-driver -d dist
-          helm push dist/union-csi-driver-*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
+          helm push dist/union-csi-driver-*.tgz "oci://ghcr.io/${owner}/charts"
