@@ -88,7 +88,7 @@ func main() {
 	var denylistMode string
 
 	flag.StringVar(&cfg.Endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
-	flag.StringVar(&cfg.DriverName, "drivername", "", "name of the driver (default: \"<backend>.csi.example.io\")")
+	flag.StringVar(&cfg.DriverName, "drivername", "", "name of the driver (default: \"<backend>.csi.ruekov.eu\")")
 	flag.StringVar(&cfg.NodeID, "nodeid", "", "node id")
 	flag.StringVar(&backendName, "backend", "", fmt.Sprintf("merge backend to run (%s)", strings.Join(backend.Names(), ", ")))
 	flag.StringVar(&cfg.KubeletRoot, "kubelet-root", "/var/lib/kubelet", "path to the kubelet directory on this node")
@@ -144,7 +144,7 @@ func main() {
 	cfg.Backend = be
 
 	if cfg.DriverName == "" {
-		cfg.DriverName = backendName + ".csi.example.io"
+		cfg.DriverName = backendName + ".csi.ruekov.eu"
 	}
 	if cfg.StateDir == "" {
 		// Alongside the plugin socket, which is already a hostPath the DaemonSet

@@ -17,7 +17,7 @@ const (
 	testPod         = "app"
 	testUID         = "pod-uid-1"
 	testKubeletRoot = "/var/lib/kubelet"
-	testDriverName  = "mergerfs.csi.example.io"
+	testDriverName  = "mergerfs.csi.ruekov.eu"
 )
 
 func podVolumesRoot() string {

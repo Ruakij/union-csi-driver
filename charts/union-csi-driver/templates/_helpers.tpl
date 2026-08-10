@@ -35,7 +35,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "union-csi-driver.driverName" -}}
-{{- default (printf "%s.csi.example.io" (include "union-csi-driver.backend" .)) .Values.driverName -}}
+{{- default (printf "%s.csi.ruekov.eu" (include "union-csi-driver.backend" .)) .Values.driverName -}}
 {{- end -}}
 
 {{- define "union-csi-driver.socketDir" -}}

@@ -27,7 +27,7 @@ helm install mergerfs-csi charts/union-csi-driver --set backend=mergerfs
 helm install overlay-csi  charts/union-csi-driver --set backend=overlay
 ```
 
-The driver name defaults to `<backend>.csi.example.io`, and that is what pods put in
+The driver name defaults to `<backend>.csi.ruekov.eu`, and that is what pods put in
 `volumes[].csi.driver`. If the cluster is k3s, RKE2 or MicroK8s, set `kubeletRootDir`
 to the node's real kubelet directory.
 
@@ -41,7 +41,7 @@ volumes:
     persistentVolumeClaim: {claimName: archive}
   - name: merged
     csi:
-      driver: mergerfs.csi.example.io
+      driver: mergerfs.csi.ruekov.eu
       volumeAttributes:
         sourceVolumes: "data=RW,archive=RO"
 ```
