@@ -20,11 +20,28 @@ own target path.
 
 ## Install
 
-One release runs one backend. Installing both means installing the chart twice.
+One release runs one backend. Installing both means installing the chart twice, with
+different release names.
+
+From the Helm repository:
+
+```sh
+helm repo add union-csi https://ruakij.github.io/union-csi-driver
+helm repo update
+helm install mergerfs-csi union-csi/union-csi-driver --set backend=mergerfs
+helm install overlay-csi  union-csi/union-csi-driver --set backend=overlay
+```
+
+Or straight from the OCI registry, which is also where prereleases go:
+
+```sh
+helm install mergerfs-csi oci://ghcr.io/ruakij/charts/union-csi-driver --set backend=mergerfs
+```
+
+Or from a checkout, to run an unreleased revision:
 
 ```sh
 helm install mergerfs-csi charts/union-csi-driver --set backend=mergerfs
-helm install overlay-csi  charts/union-csi-driver --set backend=overlay
 ```
 
 The driver name defaults to `<backend>.csi.ruekov.eu`, and that is what pods put in
