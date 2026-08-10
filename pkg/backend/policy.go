@@ -1,6 +1,10 @@
 package backend
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+	"strconv"
+)
 
 // DenylistMode controls how a denied pod-supplied option is handled.
 type DenylistMode string
@@ -104,11 +108,29 @@ func (p *Policy) checkSchema(key, value string) error {
 		if value != "true" && value != "false" {
 			return fmt.Errorf("option %q: value %q is not a bool", key, value)
 		}
+	case ValueDuration:
+		// mergerfs takes bare seconds, not a Go duration string.
+		if _, err := strconv.ParseUint(value, 10, 32); err != nil {
+			return fmt.Errorf("option %q: value %q is not a duration in seconds", key, value)
+		}
+	case ValueInt:
+		n, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return fmt.Errorf("option %q: value %q is not an integer", key, value)
+		}
+		if n < spec.MinInt || n > spec.MaxInt {
+			return fmt.Errorf("option %q: value %d out of range %d..%d", key, n, spec.MinInt, spec.MaxInt)
+		}
+	case ValueSize:
+		if !sizeRE.MatchString(value) {
+			return fmt.Errorf("option %q: value %q is not a byte size", key, value)
+		}
 	}
-	// ValueDuration, ValueInt, ValueSize: TODO parse/range-check once a backend
-	// schema actually uses them.
 	return nil
 }
+
+// sizeRE matches a byte size such as "4G" or "10485760".
+var sizeRE = regexp.MustCompile(`^[0-9]+[KMGT]?$`)
 
 func (p *Policy) denied(key string) bool {
 	for _, d := range p.config.Denylist {

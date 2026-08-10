@@ -145,6 +145,17 @@ func main() {
 		cfg.DriverName = backendName + ".csi.example.io"
 	}
 
+	// Fall back to the backend's own defaults only for flags the admin left alone,
+	// so an explicitly empty list stays empty.
+	setFlags := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { setFlags[f.Name] = true })
+	if !setFlags["default-options"] {
+		policyCfg.Defaults = be.DefaultOptions()
+	}
+	if !setFlags["option-denylist"] {
+		policyCfg.Denylist = be.DefaultDenylist()
+	}
+
 	policy := backend.NewPolicy(be.Schema(), policyCfg)
 	if err := policy.Validate(); err != nil {
 		klog.Fatalf("invalid option policy: %v", err)

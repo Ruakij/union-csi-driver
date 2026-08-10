@@ -69,6 +69,12 @@ type Backend interface {
 	// MaxWritable caps the number of RW-mode sourceVolumes entries; 0 means
 	// unlimited. Overlay uses this to enforce its single-upperdir kernel limit.
 	MaxWritable() int
+	// DefaultOptions is the backend's built-in --default-options value, used when
+	// the admin does not set that flag.
+	DefaultOptions() map[string]string
+	// DefaultDenylist is the backend's built-in --option-denylist value, used when
+	// the admin does not set that flag.
+	DefaultDenylist() []string
 	// Mount performs the union mount described by spec. Must be idempotent: callers
 	// check mountinfo first, but Mount may be called again after a driver restart.
 	Mount(ctx context.Context, spec MountSpec) error

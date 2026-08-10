@@ -1,8 +1,4 @@
 // Package overlay implements the kernel overlayfs backend.
-//
-// TODO: mount_linux.go (Fsopen/Fsmount union mount, classic mount fallback, N==1
-// bind-mount special case), option schema, upper/workdir handling. See
-// .docs/plan.md section 4.
 package overlay
 
 import (
@@ -10,6 +6,11 @@ import (
 	"errors"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
+)
+
+const (
+	modeRW = "RW"
+	modeRO = "RO"
 )
 
 func init() {
@@ -25,15 +26,43 @@ func New() backend.Backend {
 
 func (b *overlayBackend) Name() string { return "overlay" }
 
+// Schema is the set of overlayfs options a pod or admin may set. Every
+// path-bearing option (lowerdir, lowerdir+, upperdir, workdir, datadir+) is
+// structurally absent: those are driver-computed.
 func (b *overlayBackend) Schema() backend.OptionSchema {
-	// TODO: default_permissions, redirect_dir, index, xino, uuid, verity, metacopy,
-	// userxattr, nfs_export - see .docs/plan.md section 1.
-	return backend.OptionSchema{}
+	return backend.OptionSchema{
+		"default_permissions": {Kind: backend.ValueFlag},
+		"redirect_dir":        {Kind: backend.ValueEnum, Enum: []string{"nofollow", "off", "follow"}},
+		"index":               {Kind: backend.ValueEnum, Enum: []string{"off"}},
+		"xino":                {Kind: backend.ValueEnum, Enum: []string{"off", "auto", "on"}},
+		"uuid":                {Kind: backend.ValueEnum, Enum: []string{"auto", "null", "off", "on"}},
+		"verity":              {Kind: backend.ValueEnum, Enum: []string{"off", "on", "require"}},
+		"metacopy":            {Kind: backend.ValueEnum, Enum: []string{"on", "off"}},
+		"userxattr":           {Kind: backend.ValueFlag},
+		"nfs_export":          {Kind: backend.ValueEnum, Enum: []string{"on", "off"}},
+	}
+}
+
+// DefaultOptions is the only combination the kernel docs sanction when lower
+// trees may be edited at all.
+func (b *overlayBackend) DefaultOptions() map[string]string {
+	return map[string]string{
+		"index":        "off",
+		"metacopy":     "off",
+		"xino":         "off",
+		"redirect_dir": "nofollow",
+	}
+}
+
+// DefaultDenylist blocks metacopy and userxattr because together they let an
+// unprivileged writer forge user.overlay.redirect xattrs on a lower layer.
+func (b *overlayBackend) DefaultDenylist() []string {
+	return []string{"metacopy", "userxattr", "nfs_export"}
 }
 
 // SourceModes: bare entry defaults to RW (matching mergerfs, per .docs/changelog.md).
 func (b *overlayBackend) SourceModes() ([]string, string) {
-	return []string{"RW", "RO"}, "RW"
+	return []string{modeRW, modeRO}, modeRW
 }
 
 // MaxWritable is 1: overlay has exactly one upperdir, a real kernel limit, not an

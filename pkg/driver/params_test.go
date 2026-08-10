@@ -19,6 +19,8 @@ func (b *fakeBackend) Name() string                                   { return "
 func (b *fakeBackend) Schema() backend.OptionSchema                   { return backend.OptionSchema{} }
 func (b *fakeBackend) SourceModes() ([]string, string)                { return b.modes, b.defaultMode }
 func (b *fakeBackend) MaxWritable() int                               { return b.maxWritable }
+func (b *fakeBackend) DefaultOptions() map[string]string              { return nil }
+func (b *fakeBackend) DefaultDenylist() []string                      { return nil }
 func (b *fakeBackend) Mount(context.Context, backend.MountSpec) error { return nil }
 func (b *fakeBackend) Unmount(context.Context, string) error          { return nil }
 
