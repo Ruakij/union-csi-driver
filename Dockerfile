@@ -12,13 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Cross-compiling from the build platform, so a multi-arch build needs no
+# emulated toolchain.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETARCH
+ARG version=""
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -ldflags "-X main.version=${version}" -o /out/union-csi-driver ./cmd/union-csi-driver
+
 FROM alpine
 LABEL description="union-csi-driver"
-ARG binary=./bin/union-csi-driver
 
 # mergerfs and fusermount ship in every image regardless of --backend: the
 # container is privileged either way, so a binary the overlay backend never execs
 # is not meaningful attack surface, and it keeps this to one build lane.
 RUN apk add --no-cache util-linux coreutils mergerfs fuse && apk update && apk upgrade
-COPY ${binary} /union-csi-driver
+COPY --from=build /out/union-csi-driver /union-csi-driver
 ENTRYPOINT ["/union-csi-driver"]
