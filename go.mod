@@ -1,6 +1,6 @@
 module github.com/Ruakij/union-csi-driver
 
-go 1.26.0
+go 1.26.5
 
 require (
 	github.com/container-storage-interface/spec v1.12.0
