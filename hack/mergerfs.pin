@@ -1,5 +1,5 @@
 # Pinned upstream mergerfs static build, consumed by the Dockerfile.
-# The upstream-sync workflow regenerates this weekly and opens a PR.
+# The upstream-sync workflow regenerates this and opens a PR when upstream moves.
 # Refresh both with: make update-mergerfs [MERGERFS_VERSION=x.y.z]
 version=2.42.0
 amd64=0cf8692e1687c8a1140c714966c6f5f4b498a1537f1a0bef5665082ecb35fc12

@@ -29,7 +29,7 @@ update-mergerfs:
 	trap 'rm -rf "$$tmp"' EXIT; \
 	{ \
 	  echo '# Pinned upstream mergerfs static build, consumed by the Dockerfile.'; \
-	  echo '# The upstream-sync workflow regenerates this weekly and opens a PR.'; \
+	  echo '# The upstream-sync workflow regenerates this and opens a PR when upstream moves.'; \
 	  echo '# Refresh both with: make update-mergerfs [MERGERFS_VERSION=x.y.z]'; \
 	  echo 'version=$(MERGERFS_VERSION)'; \
 	} > $$tmp/pin; \
