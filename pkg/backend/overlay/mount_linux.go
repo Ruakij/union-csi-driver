@@ -65,7 +65,7 @@ var fsopenSupported = sync.OnceValue(func() bool {
 		klog.V(2).Infof("overlay: fsopen unavailable (%v), using the classic mount API", err)
 		return false
 	}
-	unix.Close(fd)
+	_ = unix.Close(fd)
 	return true
 })
 
@@ -77,7 +77,7 @@ func mountFsconfig(l *layout, target string, schema backend.OptionSchema) error 
 	if err != nil {
 		return fmt.Errorf("fsopen: %w", err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 
 	for _, dir := range l.lowers {
 		if err := unix.FsconfigSetString(fd, "lowerdir+", dir); err != nil {
@@ -115,7 +115,7 @@ func mountFsconfig(l *layout, target string, schema backend.OptionSchema) error 
 	if err != nil {
 		return fmt.Errorf("fsmount: %w", err)
 	}
-	defer unix.Close(mfd)
+	defer func() { _ = unix.Close(mfd) }()
 
 	if err := unix.MoveMount(mfd, "", unix.AT_FDCWD, target, unix.MOVE_MOUNT_F_EMPTY_PATH); err != nil {
 		return fmt.Errorf("move_mount: %w", err)

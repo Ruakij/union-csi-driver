@@ -29,7 +29,7 @@ func Parse(ep string) (string, string, error) {
 		if s[1] != "" {
 			return s[0], s[1], nil
 		}
-		return "", "", fmt.Errorf("Invalid endpoint: %v", ep)
+		return "", "", fmt.Errorf("invalid endpoint: %v", ep)
 	}
 	// Assume everything else is a file path for a Unix Domain Socket.
 	return "unix", ep, nil
@@ -43,11 +43,11 @@ func Listen(endpoint string) (net.Listener, func(), error) {
 
 	cleanup := func() {}
 	if proto == "unix" {
-		if err := os.Remove(addr); err != nil && !os.IsNotExist(err) { //nolint: vetshadow
+		if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
 			return nil, nil, fmt.Errorf("%s: %q", addr, err)
 		}
 		cleanup = func() {
-			os.Remove(addr)
+			_ = os.Remove(addr)
 		}
 	}
 

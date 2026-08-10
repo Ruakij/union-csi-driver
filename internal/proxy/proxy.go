@@ -46,7 +46,7 @@ func Run(ctx context.Context, endpoint1, endpoint2 string) (io.Closer, error) {
 	failedProxy := proxy
 	defer func() {
 		if failedProxy != nil {
-			failedProxy.Close()
+			_ = failedProxy.Close()
 		}
 	}()
 
@@ -80,7 +80,7 @@ func Run(ctx context.Context, endpoint1, endpoint2 string) (io.Closer, error) {
 				// Done, shut down. The already accepted
 				// connection gets closed.
 				klog.V(5).Infof("proxy endpoint %s closed, shutting down and close established connection", endpoint2)
-				conn1.Close()
+				_ = conn1.Close()
 				return
 			}
 
@@ -106,10 +106,10 @@ func (p *proxy) Close() error {
 		p.cancel()
 	}
 	if p.s1 != nil {
-		p.s1.Close()
+		_ = p.s1.Close()
 	}
 	if p.s2 != nil {
-		p.s2.Close()
+		_ = p.s2.Close()
 	}
 	if p.cleanup1 != nil {
 		p.cleanup1()
@@ -124,7 +124,7 @@ func copy(from, to net.Conn, fromEndpoint, toEndpoint string) {
 	klog.V(5).Infof("starting to copy %s -> %s", fromEndpoint, toEndpoint)
 	// Signal recipient that no more data is going to come.
 	// This also stops reading from it.
-	defer to.Close()
+	defer func() { _ = to.Close() }()
 	// Copy data until EOF.
 	cnt, err := io.Copy(to, from)
 	klog.V(5).Infof("done copying %s -> %s: %d bytes, %v", fromEndpoint, toEndpoint, cnt, err)

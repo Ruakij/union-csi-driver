@@ -36,7 +36,7 @@ func TestProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("proxy error: %v", err)
 	}
-	defer closer.Close()
+	defer func() { _ = closer.Close() }()
 
 	t.Run("a-to-b", func(t *testing.T) {
 		sendReceive(t, endpoint1, endpoint2)
@@ -51,12 +51,12 @@ func sendReceive(t *testing.T, endpoint1, endpoint2 string) {
 	if err != nil {
 		t.Fatalf("error connecting to first endpoint %s: %v", endpoint1, err)
 	}
-	defer conn1.Close()
+	defer func() { _ = conn1.Close() }()
 	conn2, err := net.Dial("unix", endpoint2)
 	if err != nil {
 		t.Fatalf("error connecting to second endpoint %s: %v", endpoint2, err)
 	}
-	defer conn2.Close()
+	defer func() { _ = conn2.Close() }()
 
 	req1 := "ping"
 	if _, err := conn1.Write([]byte(req1)); err != nil {

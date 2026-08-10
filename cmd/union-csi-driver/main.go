@@ -129,7 +129,7 @@ func main() {
 		if err != nil {
 			klog.Fatalf("failed to run proxy: %v", err)
 		}
-		defer closer.Close()
+		defer func() { _ = closer.Close() }()
 
 		sigc := make(chan os.Signal, 1)
 		signal.Notify(sigc, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT)
