@@ -43,6 +43,14 @@
   ],
   customManagers: [
     {
+      // Tool versions pinned inside workflow steps, marked with a renovate comment.
+      customType: "regex",
+      managerFilePatterns: ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+version: (?<currentValue>\\S+)",
+      ],
+    },
+    {
       customType: "regex",
       managerFilePatterns: ["/^hack/mergerfs\\.pin$/"],
       matchStrings: ["version=(?<currentValue>\\S+)"],
