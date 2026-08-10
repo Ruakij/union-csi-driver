@@ -8,6 +8,8 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/klog/v2"
+	mount "k8s.io/mount-utils"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 	"github.com/Ruakij/union-csi-driver/pkg/volsource"
@@ -19,8 +21,8 @@ const (
 
 // NodePublishVolume resolves the pod's sibling volumes named in sourceVolumes,
 // waits for them to become ready, and mounts the union at req.TargetPath.
-//
-// TODO: mountinfo idempotency check (return early if TargetPath is already mounted with the expected source set)
+// Kubelet re-issues this call freely, including after a driver restart, so it is
+// idempotent.
 func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	if req.GetVolumeCapability() == nil {
 		return nil, status.Error(codes.InvalidArgument, "volume capability missing in request")
@@ -33,6 +35,19 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 	if req.GetVolumeContext()[attrEphemeral] != "true" {
 		return nil, status.Error(codes.InvalidArgument, "this driver only supports ephemeral inline volumes")
+	}
+
+	// A target path is unique to one volume of one pod, so an existing mount there
+	// is this volume's own, already published. The backend's source set is not
+	// re-checked: a bind-mounted single branch does not name its source in
+	// mountinfo, so the comparison would be true only for the multi-branch case.
+	mounted, err := d.isMounted(req.GetTargetPath())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "check target path: %v", err)
+	}
+	if mounted {
+		klog.V(4).Infof("target path %s is already mounted, nothing to do", req.GetTargetPath())
+		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
 	attrs, err := d.parseAttributes(req.GetVolumeContext())
@@ -110,6 +125,23 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
+}
+
+// isMounted reports whether path is a mountpoint, treating a missing path as not
+// mounted and a corrupted mount as mounted so it gets unpublished rather than
+// silently republished over.
+func (d *Driver) isMounted(path string) (bool, error) {
+	mounted, err := d.mounter.IsMountPoint(path)
+	switch {
+	case err == nil:
+		return mounted, nil
+	case os.IsNotExist(err):
+		return false, nil
+	case mount.IsCorruptedMnt(err):
+		return true, nil
+	default:
+		return false, err
+	}
 }
 
 func (d *Driver) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
