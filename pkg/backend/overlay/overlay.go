@@ -3,7 +3,6 @@ package overlay
 
 import (
 	"context"
-	"errors"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
@@ -72,9 +71,9 @@ func (b *overlayBackend) MaxWritable() int {
 }
 
 func (b *overlayBackend) Mount(ctx context.Context, spec backend.MountSpec) error {
-	return errors.New("overlay backend not implemented yet")
+	return mountUnion(spec, b.Schema())
 }
 
 func (b *overlayBackend) Unmount(ctx context.Context, target string) error {
-	return errors.New("overlay backend not implemented yet")
+	return unmountUnion(target)
 }
