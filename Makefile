@@ -17,8 +17,8 @@ all: build
 
 include release-tools/build.make
 
-# Refresh hack/mergerfs.pin, which the image build verifies against. Renovate can
-# bump the version but not the digests, so run this on its PR.
+# Refresh hack/mergerfs.pin, which the image build verifies against. Nothing bumps
+# this automatically; the upstream-sync workflow opens a PR when it lags upstream.
 MERGERFS_VERSION ?= $(shell sed -n 's/^version=//p' hack/mergerfs.pin)
 MERGERFS_URL = https://github.com/trapexit/mergerfs/releases/download/$(MERGERFS_VERSION)
 
@@ -29,7 +29,7 @@ update-mergerfs:
 	trap 'rm -rf "$$tmp"' EXIT; \
 	{ \
 	  echo '# Pinned upstream mergerfs static build, consumed by the Dockerfile.'; \
-	  echo '# Renovate bumps version here; the digests are not automatic.'; \
+	  echo '# Not updated automatically; see the pin-check workflow.'; \
 	  echo '# Refresh both with: make update-mergerfs [MERGERFS_VERSION=x.y.z]'; \
 	  echo 'version=$(MERGERFS_VERSION)'; \
 	} > $$tmp/pin; \

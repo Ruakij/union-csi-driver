@@ -25,10 +25,13 @@ jobs:
       - name: go vet (linux)
         run: GOOS=linux go vet ./...
       - run: go test -race ./...
+      # Read from a plain file so the upstream-sync workflow can bump it without a
+      # token carrying the workflow scope.
+      - id: lint-version
+        run: echo "version=$(cat hack/golangci-lint.version)" >> "$GITHUB_OUTPUT"
       - uses: golangci/golangci-lint-action@v9
         with:
-          # renovate: datasource=github-releases depName=golangci/golangci-lint
-          version: v2.12.2
+          version: ${{ steps.lint-version.outputs.version }}
 
   security:
     runs-on: ubuntu-latest
