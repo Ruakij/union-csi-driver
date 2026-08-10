@@ -1,5 +1,12 @@
 # union-csi-driver
 
+[![CI](https://github.com/Ruakij/union-csi-driver/actions/workflows/ci.yaml/badge.svg)](https://github.com/Ruakij/union-csi-driver/actions/workflows/ci.yaml)
+[![Version](https://img.shields.io/github/v/release/Ruakij/union-csi-driver?label=Version&color=green)](https://github.com/Ruakij/union-csi-driver/releases)
+![Kubernetes](https://img.shields.io/badge/Kubernetes-1.25%2B-blue)
+![Backends](https://img.shields.io/badge/Backends-overlayfs%20%7C%20mergerfs-orange)
+![Go](https://img.shields.io/github/go-mod/go-version/Ruakij/union-csi-driver?label=Go)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 **An overlayfs and mergerfs CSI driver for Kubernetes.**
 
 It unions several sibling volumes already declared on a pod into a single merged mount
