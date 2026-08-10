@@ -16,3 +16,19 @@ CMDS=union-csi-driver
 all: build
 
 include release-tools/build.make
+
+# Mount-level tests need a real Linux kernel, CAP_SYS_ADMIN, /dev/fuse and the
+# mergerfs binary, so they run in a privileged container. On a non-Linux machine
+# that container is inside colima or another Linux VM.
+MOUNTTEST_IMAGE ?= union-csi-mounttest:local
+MOUNTTEST_PKGS ?= ./pkg/backend/...
+
+.PHONY: test-mount-image
+test-mount-image:
+	docker build --target mergerfs -t union-csi-mergerfs:local .
+	docker build -f hack/mounttest.Dockerfile --build-arg MERGERFS_IMAGE=union-csi-mergerfs:local -t $(MOUNTTEST_IMAGE) hack
+
+.PHONY: test-mount
+test-mount: test-mount-image
+	docker run --rm --privileged -v $(CURDIR):/src -w /src -e GOFLAGS=-buildvcs=false \
+		$(MOUNTTEST_IMAGE) go test -tags mounttest -count=1 $(MOUNTTEST_PKGS)

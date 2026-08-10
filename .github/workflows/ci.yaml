@@ -25,6 +25,15 @@ jobs:
         with:
           version: latest
 
+  # Real overlayfs and mergerfs mounts. The runner is a VM with its own kernel, so
+  # a privileged container is enough; no nested VM is involved.
+  mount:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: test -c /dev/fuse || (echo "runner has no /dev/fuse" >&2; exit 1)
+      - run: make test-mount
+
   helm:
     runs-on: ubuntu-latest
     steps:
