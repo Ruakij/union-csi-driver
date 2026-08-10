@@ -20,10 +20,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Spelled out rather than left to the default so it stays in lockstep with the
+      # appVersion the chart job stamps; a mismatch there is an ImagePullBackOff.
+      # major.minor and latest are skipped for prereleases by the action itself.
       - id: meta
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -49,9 +55,11 @@ jobs:
       # an appVersion, and therefore a default image tag, that was never pushed.
       - name: Stamp the chart with the tag
         run: |
+          # Helm rejects a v prefix on version; appVersion keeps it because that is
+          # the image tag.
           version="${GITHUB_REF_NAME#v}"
           sed -i "s/^version: .*/version: ${version}/" charts/union-csi-driver/Chart.yaml
-          sed -i "s/^appVersion: .*/appVersion: \"${version}\"/" charts/union-csi-driver/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"v${version}\"/" charts/union-csi-driver/Chart.yaml
           helm lint charts/union-csi-driver
       - run: |
           git config user.name "${GITHUB_ACTOR}"
@@ -65,7 +73,11 @@ jobs:
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Push chart to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password "${{ secrets.GITHUB_TOKEN }}"
+          # OCI references must be lowercase, and the owner login is not.
+          owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin <<<"${GITHUB_TOKEN}"
           helm package charts/union-csi-driver -d dist
-          helm push dist/union-csi-driver-*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
+          helm push dist/union-csi-driver-*.tgz "oci://ghcr.io/${owner}/charts"

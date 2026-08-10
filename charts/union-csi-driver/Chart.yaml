@@ -3,7 +3,7 @@ name: union-csi-driver
 description: overlayfs and mergerfs CSI driver - unions a pod's sibling volumes into one merged mount
 type: application
 version: 0.1.0
-appVersion: "0.1.0"
+appVersion: "v0.1.0"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/Ruakij/union-csi-driver
 sources:

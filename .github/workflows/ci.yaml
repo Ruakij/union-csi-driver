@@ -2,7 +2,10 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    # automation/** is here because upstream-sync pushes those branches over SSH.
+    # A PR it opens cannot fire pull_request, but the push can, and the checks
+    # land on the same commit either way.
+    branches: [main, "automation/**"]
   pull_request:
   # A CVE published after a merge is still our problem, so rescan daily.
   schedule:
