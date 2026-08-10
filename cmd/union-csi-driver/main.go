@@ -1,19 +1,3 @@
-/*
-Copyright 2017 The Kubernetes Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package main
 
 import (
@@ -23,14 +7,19 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"strings"
 	"syscall"
+	"time"
 
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
-	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/kubernetes-csi/csi-driver-host-path/internal/proxy"
-	"github.com/kubernetes-csi/csi-driver-host-path/pkg/hostpath"
-	"github.com/kubernetes-csi/csi-lib-utils/standardflags"
+	"github.com/Ruakij/union-csi-driver/internal/proxy"
+	"github.com/Ruakij/union-csi-driver/pkg/backend"
+	_ "github.com/Ruakij/union-csi-driver/pkg/backend/mergerfs"
+	_ "github.com/Ruakij/union-csi-driver/pkg/backend/overlay"
+	"github.com/Ruakij/union-csi-driver/pkg/driver"
 )
 
 var (
@@ -38,44 +27,83 @@ var (
 	version = ""
 )
 
-func main() {
-	cfg := hostpath.Config{
-		VendorVersion: version,
+// csvFlag is a flag.Value collecting a comma-separated list into a []string.
+type csvFlag struct {
+	values *[]string
+}
+
+func (f csvFlag) String() string {
+	if f.values == nil {
+		return ""
 	}
+	return strings.Join(*f.values, ",")
+}
 
-	flag.StringVar(&cfg.Endpoint, "endpoint", "unix:///tmp/csi.sock", "CSI endpoint")
-	flag.StringVar(&cfg.DriverName, "drivername", "hostpath.csi.k8s.io", "name of the driver")
-	flag.StringVar(&cfg.StateDir, "statedir", "/csi-data-dir", "directory for storing state information across driver restarts, volumes and snapshots")
+func (f csvFlag) Set(value string) error {
+	if value == "" {
+		*f.values = nil
+		return nil
+	}
+	*f.values = strings.Split(value, ",")
+	return nil
+}
+
+// kvFlag is a flag.Value parsing a comma-separated key=value list into a map.
+type kvFlag struct {
+	values *map[string]string
+}
+
+func (f kvFlag) String() string {
+	if f.values == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(*f.values))
+	for k, v := range *f.values {
+		parts = append(parts, k+"="+v)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (f kvFlag) Set(value string) error {
+	result := map[string]string{}
+	if value != "" {
+		for _, pair := range strings.Split(value, ",") {
+			kv := strings.SplitN(pair, "=", 2)
+			if len(kv) == 2 {
+				result[kv[0]] = kv[1]
+			} else {
+				result[kv[0]] = ""
+			}
+		}
+	}
+	*f.values = result
+	return nil
+}
+
+func main() {
+	var cfg driver.Config
+	var policyCfg backend.PolicyConfig
+	var backendName string
+	var denylistMode string
+
+	flag.StringVar(&cfg.Endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
+	flag.StringVar(&cfg.DriverName, "drivername", "", "name of the driver (default: \"<backend>.csi.example.io\")")
 	flag.StringVar(&cfg.NodeID, "nodeid", "", "node id")
-	flag.BoolVar(&cfg.Ephemeral, "ephemeral", false, "publish volumes in ephemeral mode even if kubelet did not ask for it (only needed for Kubernetes 1.15)")
-	flag.Int64Var(&cfg.MaxVolumesPerNode, "maxvolumespernode", 0, "limit of volumes per node")
-	flag.Var(&cfg.Capacity, "capacity", "Simulate storage capacity. The parameter is <kind>=<quantity> where <kind> is the value of a 'kind' storage class parameter and <quantity> is the total amount of bytes for that kind. The flag may be used multiple times to configure different kinds.")
-	flag.BoolVar(&cfg.EnableAttach, "enable-attach", false, "Enables RPC_PUBLISH_UNPUBLISH_VOLUME capability.")
-	flag.BoolVar(&cfg.CheckVolumeLifecycle, "check-volume-lifecycle", false, "Can be used to turn some violations of the volume lifecycle into warnings instead of failing the incorrect gRPC call. Disabled by default because of https://github.com/kubernetes/kubernetes/issues/101911.")
-	flag.Int64Var(&cfg.MaxVolumeSize, "max-volume-size", 1024*1024*1024*1024, "maximum size of volumes in bytes (inclusive)")
-	flag.BoolVar(&cfg.EnableTopology, "enable-topology", true, "Enables PluginCapability_Service_VOLUME_ACCESSIBILITY_CONSTRAINTS capability.")
-	flag.BoolVar(&cfg.EnableVolumeExpansion, "node-expand-required", true, "Enables volume expansion capability of the plugin(Deprecated). Please use enable-volume-expansion flag.")
+	flag.StringVar(&backendName, "backend", "", fmt.Sprintf("merge backend to run (%s)", strings.Join(backend.Names(), ", ")))
+	flag.StringVar(&cfg.KubeletRoot, "kubelet-root", "/var/lib/kubelet", "path to the kubelet directory on this node")
+	flag.DurationVar(&cfg.PublishTimeout, "publish-timeout", 30*time.Second, "how long NodePublishVolume waits for sibling volumes to become ready")
+	flag.IntVar(&cfg.MaxSourceVolumes, "max-source-volumes", 32, "maximum number of sourceVolumes entries accepted per volume")
 
-	flag.BoolVar(&cfg.EnableVolumeExpansion, "enable-volume-expansion", true, "Enables volume expansion feature.")
-	flag.BoolVar(&cfg.EnableControllerModifyVolume, "enable-controller-modify-volume", false, "Enables Controller modify volume feature.")
-	flag.BoolVar(&cfg.EnableSnapshotMetadata, "enable-snapshot-metadata", false, "Enables Snapshot Metadata service.")
-	snapshotMetadataBlockType := flag.String("snapshot-metadata-block-type", "FIXED_LENGTH", "Expected Snapshot Metadata block type in response. Allowed valid types are FIXED_LENGTH or VARIABLE_LENGTH. If not specified, FIXED_LENGTH is used by default.")
-	flag.Var(&cfg.AcceptedMutableParameterNames, "accepted-mutable-parameter-names", "Comma separated list of parameter names that can be modified on a persistent volume. This is only used when enable-controller-modify-volume is true. If unset, all parameters are mutable.")
-	flag.BoolVar(&cfg.DisableControllerExpansion, "disable-controller-expansion", false, "Disables Controller volume expansion capability.")
-	flag.BoolVar(&cfg.DisableNodeExpansion, "disable-node-expansion", false, "Disables Node volume expansion capability.")
-	flag.BoolVar(&cfg.EnableListSnapshots, "enable-list-snapshots", true, "Enables ControllerServiceCapability_RPC_LIST_SNAPSHOTS capability. Defaults to true.")
-	flag.Int64Var(&cfg.MaxVolumeExpansionSizeNode, "max-volume-size-node", 0, "Maximum allowed size of volume when expanded on the node. Defaults to same size as max-volume-size.")
+	flag.Var(csvFlag{&policyCfg.Allowlist}, "option-allowlist", "comma-separated list of allowed backend options (empty: any schema-known option not denied)")
+	flag.Var(csvFlag{&policyCfg.Denylist}, "option-denylist", "comma-separated list of denied backend options (empty: backend default)")
+	flag.StringVar(&denylistMode, "denylist-mode", "refuse", "how to handle a denied pod option: refuse | strip")
+	flag.Var(kvFlag{&policyCfg.Defaults}, "default-options", "comma-separated key=value backend options applied when the pod does not set them")
+	flag.Var(kvFlag{&policyCfg.Forced}, "forced-options", "comma-separated key=value backend options applied last, not pod-overridable")
 
-	flag.Int64Var(&cfg.AttachLimit, "attach-limit", 0, "Maximum number of attachable volumes on a node. Zero refers to no limit.")
-	showVersion := flag.Bool("version", false, "Show version.")
-	// The proxy-endpoint option is intended to used by the Kubernetes E2E test suite
-	// for proxying incoming calls to the embedded mock CSI driver.
-	proxyEndpoint := flag.String("proxy-endpoint", "", "Instead of running the CSI driver code, just proxy connections from csiEndpoint to the given listening socket.")
-
-	standardflags.AddAutomaxprocs(func(format string, args ...any) {
-		// wrapping fmt.Printf and ignoring its return values
-		fmt.Printf(format, args...)
-	})
+	showVersion := flag.Bool("version", false, "show version")
+	// The proxy-endpoint option is intended to be used by the Kubernetes E2E test
+	// suite for proxying incoming calls to the embedded mock CSI driver.
+	proxyEndpoint := flag.String("proxy-endpoint", "", "instead of running the CSI driver code, just proxy connections from csiEndpoint to the given listening socket")
 
 	klog.InitFlags(nil)
 	flag.Parse()
@@ -86,8 +114,10 @@ func main() {
 		return
 	}
 
-	if cfg.Ephemeral {
-		fmt.Fprintln(os.Stderr, "Deprecation warning: The ephemeral flag is deprecated and should only be used when deploying on Kubernetes 1.15. It will be removed in the future.")
+	cfg.VendorVersion = version
+	policyCfg.DenylistMode = backend.DenylistMode(denylistMode)
+	if policyCfg.DenylistMode != backend.DenylistRefuse && policyCfg.DenylistMode != backend.DenylistStrip {
+		klog.Fatalf("invalid --denylist-mode %q, must be refuse or strip", denylistMode)
 	}
 
 	if *proxyEndpoint != "" {
@@ -99,50 +129,47 @@ func main() {
 		}
 		defer closer.Close()
 
-		// Wait for signal
 		sigc := make(chan os.Signal, 1)
-		sigs := []os.Signal{
-			syscall.SIGTERM,
-			syscall.SIGHUP,
-			syscall.SIGINT,
-			syscall.SIGQUIT,
-		}
-		signal.Notify(sigc, sigs...)
-
+		signal.Notify(sigc, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT)
 		<-sigc
 		return
 	}
 
-	if cfg.MaxVolumeExpansionSizeNode == 0 {
-		cfg.MaxVolumeExpansionSizeNode = cfg.MaxVolumeSize
-	}
-
-	// validate snapshot-metadata-type arg block type
-	bt, ok := csi.BlockMetadataType_value[*snapshotMetadataBlockType]
+	be, ok := backend.Get(backendName)
 	if !ok {
-		fmt.Printf("invalid snapshot-metadata-block-type passed, please pass one of the - FIXED_LENGTH, VARIABLE_LENGTH")
-		os.Exit(1)
+		klog.Fatalf("unknown --backend %q, must be one of: %s", backendName, strings.Join(backend.Names(), ", "))
 	}
-	cfg.SnapshotMetadataBlockType = csi.BlockMetadataType(bt)
+	cfg.Backend = be
 
-	driver, err := hostpath.NewHostPathDriver(cfg)
+	if cfg.DriverName == "" {
+		cfg.DriverName = backendName + ".csi.example.io"
+	}
+
+	policy := backend.NewPolicy(be.Schema(), policyCfg)
+	if err := policy.Validate(); err != nil {
+		klog.Fatalf("invalid option policy: %v", err)
+	}
+	cfg.Policy = policy
+
+	restConfig, err := rest.InClusterConfig()
 	if err != nil {
-		fmt.Printf("Failed to initialize driver: %s", err.Error())
-		os.Exit(1)
+		klog.Fatalf("failed to build in-cluster kubeconfig: %v", err)
+	}
+	kubeClient, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		klog.Fatalf("failed to build kubernetes client: %v", err)
+	}
+	cfg.KubeClient = kubeClient
+
+	d, err := driver.New(cfg)
+	if err != nil {
+		klog.Fatalf("failed to initialize driver: %v", err)
 	}
 
-	// Wait for signal
 	stopCh := make(chan os.Signal, 1)
-	sigs := []os.Signal{
-		syscall.SIGTERM,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGQUIT,
-	}
-	signal.Notify(stopCh, sigs...)
+	signal.Notify(stopCh, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT)
 
-	if err := driver.Run(stopCh); err != nil {
-		fmt.Printf("Failed to run driver: %s", err.Error())
-		os.Exit(1)
+	if err := d.Run(stopCh); err != nil {
+		klog.Fatalf("driver exited: %v", err)
 	}
 }

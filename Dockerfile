@@ -13,11 +13,9 @@
 # limitations under the License.
 
 FROM alpine
-LABEL maintainers="Kubernetes Authors"
-LABEL description="HostPath Driver"
-ARG binary=./bin/hostpathplugin
+LABEL description="union-csi-driver"
+ARG binary=./bin/union-csi-driver
 
-# Add util-linux to get a new version of losetup.
-RUN apk add util-linux coreutils socat tar && apk update && apk upgrade
-COPY ${binary} /hostpathplugin
-ENTRYPOINT ["/hostpathplugin"]
+RUN apk add util-linux coreutils && apk update && apk upgrade
+COPY ${binary} /union-csi-driver
+ENTRYPOINT ["/union-csi-driver"]
