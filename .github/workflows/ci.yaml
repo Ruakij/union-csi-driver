@@ -77,7 +77,9 @@ jobs:
           helm template ci charts/union-csi-driver --set backend=mergerfs > /dev/null
           helm template ci charts/union-csi-driver --set backend=overlay > /dev/null
       - uses: helm/chart-testing-action@v2
-      - run: ct lint --target-branch ${{ github.event.repository.default_branch }} --chart-dirs charts
+      # The released chart version comes from the git tag, not Chart.yaml, so
+      # demanding a version bump per chart change would be asking for a no-op edit.
+      - run: ct lint --target-branch ${{ github.event.repository.default_branch }} --chart-dirs charts --check-version-increment=false
 
   image:
     runs-on: ubuntu-latest

@@ -1,6 +1,6 @@
 # Merge backend to run on this release. One backend per release; installing both
 # means installing the chart twice with different backend and driverName values.
-backend: mergerfs # or: overlay
+backend: mergerfs  # or: overlay
 
 # Defaults to "{{ .Values.backend }}.csi.ruekov.eu". This is the name pods put in
 # volumes[].csi.driver.
@@ -8,7 +8,7 @@ driverName: ""
 
 image:
   repository: ghcr.io/ruakij/union-csi-driver
-  tag: "" # defaults to the chart appVersion
+  tag: ""  # defaults to the chart appVersion
   pullPolicy: IfNotPresent
 
 registrar:
@@ -26,10 +26,10 @@ publishTimeout: 30s
 maxSourceVolumes: 32
 
 options:
-  allowlist: "" # empty: any schema-known option that is not denied
-  denylist: "" # empty: backend default
-  denylistMode: refuse # refuse | strip
-  defaults: "" # empty: backend default
+  allowlist: ""  # empty: any schema-known option that is not denied
+  denylist: ""  # empty: backend default
+  denylistMode: refuse  # refuse | strip
+  defaults: ""  # empty: backend default
   forced: ""
 
 mergerfs:
@@ -37,7 +37,7 @@ mergerfs:
   # reconcile loop. systemd: same mounts, but the node is expected to have it.
   # in-container: never mount /run/systemd; daemons die with the driver pod and
   # are remounted by the reconcile loop.
-  daemonLifetime: auto # auto | systemd | in-container
+  daemonLifetime: auto  # auto | systemd | in-container
 
 logLevel: 2
 

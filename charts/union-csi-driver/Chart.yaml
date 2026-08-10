@@ -8,6 +8,9 @@ kubeVersion: ">=1.25.0-0"
 home: https://github.com/Ruakij/union-csi-driver
 sources:
   - https://github.com/Ruakij/union-csi-driver
+maintainers:
+  - name: Ruakij
+    url: https://github.com/Ruakij
 keywords:
   - csi
   - storage
