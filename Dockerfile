@@ -16,6 +16,9 @@ FROM alpine
 LABEL description="union-csi-driver"
 ARG binary=./bin/union-csi-driver
 
-RUN apk add util-linux coreutils && apk update && apk upgrade
+# mergerfs and fusermount ship in every image regardless of --backend: the
+# container is privileged either way, so a binary the overlay backend never execs
+# is not meaningful attack surface, and it keeps this to one build lane.
+RUN apk add --no-cache util-linux coreutils mergerfs fuse && apk update && apk upgrade
 COPY ${binary} /union-csi-driver
 ENTRYPOINT ["/union-csi-driver"]
