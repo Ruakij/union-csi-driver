@@ -1,0 +1,16 @@
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: {{ include "union-csi-driver.driverName" . }}
+  labels:
+    {{- include "union-csi-driver.labels" . | nindent 4 }}
+    # Without this, clusters running the CSI volume admission plugin default the
+    # driver to privileged-only namespaces.
+    security.openshift.io/csi-ephemeral-volume-profile: restricted
+spec:
+  attachRequired: false
+  # Pod identity in volumeAttributes is how sibling volumes get resolved. The
+  # driver refuses to publish without it.
+  podInfoOnMount: true
+  volumeLifecycleModes:
+    - Ephemeral

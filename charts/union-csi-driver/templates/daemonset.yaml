@@ -1,0 +1,148 @@
+{{- $kubeletRoot := trimSuffix "/" .Values.kubeletRootDir -}}
+{{- $backend := include "union-csi-driver.backend" . -}}
+{{- $systemd := include "union-csi-driver.wantsSystemd" . -}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "union-csi-driver.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "union-csi-driver.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "union-csi-driver.selectorLabels" . | nindent 6 }}
+  updateStrategy:
+    {{- toYaml .Values.updateStrategy | nindent 4 }}
+  template:
+    metadata:
+      labels:
+        {{- include "union-csi-driver.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "union-csi-driver.serviceAccountName" . }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- if $systemd }}
+      # The mergerfs daemon is handed to host systemd by PID, which only works if
+      # that PID means the same thing to both sides.
+      hostPID: true
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: union-csi-driver
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --backend={{ $backend }}
+            - --drivername={{ include "union-csi-driver.driverName" . }}
+            - --endpoint=unix:///csi/csi.sock
+            - --nodeid=$(KUBE_NODE_NAME)
+            - --kubelet-root={{ $kubeletRoot }}
+            - --publish-timeout={{ .Values.publishTimeout }}
+            - --max-source-volumes={{ .Values.maxSourceVolumes }}
+            - --denylist-mode={{ .Values.options.denylistMode }}
+            {{- with .Values.options.allowlist }}
+            - --option-allowlist={{ . }}
+            {{- end }}
+            {{- with .Values.options.denylist }}
+            - --option-denylist={{ . }}
+            {{- end }}
+            {{- with .Values.options.defaults }}
+            - --default-options={{ . }}
+            {{- end }}
+            {{- with .Values.options.forced }}
+            - --forced-options={{ . }}
+            {{- end }}
+            - -v={{ .Values.logLevel }}
+          env:
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: pods-dir
+              mountPath: {{ $kubeletRoot }}/pods
+              # Bidirectional: sibling volume mounts must appear here, and the
+              # union mount this driver makes must propagate back to the consumer.
+              mountPropagation: Bidirectional
+            - name: plugins-dir
+              mountPath: {{ $kubeletRoot }}/plugins
+              mountPropagation: Bidirectional
+            {{- if eq $backend "mergerfs" }}
+            - name: dev-fuse
+              mountPath: /dev/fuse
+            {{- end }}
+            {{- if $systemd }}
+            - name: run-systemd
+              mountPath: /run/systemd
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        - name: node-driver-registrar
+          image: "{{ .Values.registrar.image.repository }}:{{ .Values.registrar.image.tag }}"
+          imagePullPolicy: {{ .Values.registrar.image.pullPolicy }}
+          args:
+            - --csi-address=/csi/csi.sock
+            - --kubelet-registration-path={{ include "union-csi-driver.socketDir" . }}/csi.sock
+            - -v={{ .Values.logLevel }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: {{ include "union-csi-driver.socketDir" . }}
+            type: DirectoryOrCreate
+        - name: pods-dir
+          hostPath:
+            path: {{ $kubeletRoot }}/pods
+            type: Directory
+        - name: plugins-dir
+          hostPath:
+            path: {{ $kubeletRoot }}/plugins
+            type: Directory
+        - name: registration-dir
+          hostPath:
+            path: {{ $kubeletRoot }}/plugins_registry
+            type: Directory
+        {{- if eq $backend "mergerfs" }}
+        - name: dev-fuse
+          hostPath:
+            path: /dev/fuse
+            type: CharDevice
+        {{- end }}
+        {{- if $systemd }}
+        - name: run-systemd
+          hostPath:
+            path: /run/systemd
+            # auto leaves the type unchecked so the pod still starts on a node
+            # without systemd; systemd asks kubelet to refuse instead.
+            type: {{ if eq .Values.mergerfs.daemonLifetime "systemd" }}Directory{{ else }}""{{ end }}
+        {{- end }}

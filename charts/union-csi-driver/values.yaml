@@ -1,0 +1,60 @@
+# Merge backend to run on this release. One backend per release; installing both
+# means installing the chart twice with different backend and driverName values.
+backend: mergerfs # or: overlay
+
+# Defaults to "{{ .Values.backend }}.csi.example.io". This is the name pods put in
+# volumes[].csi.driver.
+driverName: ""
+
+image:
+  repository: ghcr.io/ruakij/union-csi-driver
+  tag: "" # defaults to the chart appVersion
+  pullPolicy: IfNotPresent
+
+registrar:
+  image:
+    repository: registry.k8s.io/sig-storage/csi-node-driver-registrar
+    tag: v2.13.0
+    pullPolicy: IfNotPresent
+
+# Presets: k3s and RKE2 use /var/lib/kubelet by default but k3s installs that as a
+# symlink to /var/lib/rancher/k3s/agent/kubelet; MicroK8s uses
+# /var/snap/microk8s/common/var/lib/kubelet.
+kubeletRootDir: /var/lib/kubelet
+
+publishTimeout: 30s
+maxSourceVolumes: 32
+
+options:
+  allowlist: "" # empty: any schema-known option that is not denied
+  denylist: "" # empty: backend default
+  denylistMode: refuse # refuse | strip
+  defaults: "" # empty: backend default
+  forced: ""
+
+mergerfs:
+  # auto: mount /run/systemd and let the driver probe for it, falling back to a
+  # reconcile loop. systemd: same mounts, but the node is expected to have it.
+  # in-container: never mount /run/systemd; daemons die with the driver pod and
+  # are remounted by the reconcile loop.
+  daemonLifetime: auto # auto | systemd | in-container
+
+logLevel: 2
+
+rbac:
+  create: true
+serviceAccount:
+  create: true
+  name: ""
+
+priorityClassName: system-node-critical
+# A node agent belongs on every node.
+tolerations:
+  - operator: Exists
+nodeSelector: {}
+affinity: {}
+resources: {}
+podAnnotations: {}
+podLabels: {}
+updateStrategy:
+  type: RollingUpdate

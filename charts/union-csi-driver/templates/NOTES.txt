@@ -1,0 +1,37 @@
+{{ include "union-csi-driver.fullname" . }} is installed with the {{ include "union-csi-driver.backend" . }} backend.
+
+Pods request a merged mount by naming their own sibling volumes:
+
+  volumes:
+    - name: merged
+      csi:
+        driver: {{ include "union-csi-driver.driverName" . }}
+        volumeAttributes:
+          sourceVolumes: "data=RW,archive=RO"
+
+sourceVolumes entries are volume names from the same pod, leftmost wins on lookup.
+{{- if eq (include "union-csi-driver.backend" .) "overlay" }}
+The overlay backend accepts at most one =RW entry and it must be listed first: the
+kernel always stacks the single upperdir on top. Its merged content lives in
+<volume>/.union-csi/upper, so data already at the root of the RW volume is not
+part of the merge.
+{{- else }}
+Any number of entries may be =RW; category.create decides which one a new file
+lands on. mergerfs has no copy-on-write: it cannot express read-only lowers plus a
+writable top layer.
+{{- end }}
+
+{{- if eq (include "union-csi-driver.wantsSystemd" .) "" }}
+{{ if eq (include "union-csi-driver.backend" .) "mergerfs" }}
+WARNING: mergerfs.daemonLifetime is "in-container". Mergerfs daemons die with the
+driver pod and are restored by the driver's reconcile loop, but consumers holding
+open file descriptors across a restart keep seeing ENOTCONN until they reopen.
+{{- end }}
+{{- end }}
+
+{{- if and (eq .Values.kubeletRootDir "/var/lib/kubelet") (not .Values.driverName) }}
+
+kubeletRootDir is the default /var/lib/kubelet. If this is k3s, RKE2 or MicroK8s,
+check the node's real kubelet directory: publishing fails in a way that looks like
+a missing sibling volume if it is wrong.
+{{- end }}
