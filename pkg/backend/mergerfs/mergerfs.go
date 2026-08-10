@@ -1,12 +1,10 @@
 // Package mergerfs implements the mergerfs (FUSE) backend.
 //
-// TODO: process invocation and argv construction, daemon lifetime (host systemd
-// transient scope, in-container fallback + reconcile loop).
+// TODO: reconcile loop repairing dead FUSE mounts where host systemd is absent.
 package mergerfs
 
 import (
 	"context"
-	"errors"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
@@ -74,9 +72,9 @@ func (b *mergerfsBackend) MaxWritable() int {
 }
 
 func (b *mergerfsBackend) Mount(ctx context.Context, spec backend.MountSpec) error {
-	return errors.New("mergerfs backend not implemented yet")
+	return mountUnion(ctx, spec)
 }
 
 func (b *mergerfsBackend) Unmount(ctx context.Context, volumeID, target string) error {
-	return errors.New("mergerfs backend not implemented yet")
+	return unmountUnion(ctx, volumeID, target)
 }

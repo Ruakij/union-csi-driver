@@ -4,6 +4,8 @@ go 1.26.0
 
 require (
 	github.com/container-storage-interface/spec v1.12.0
+	github.com/coreos/go-systemd/v22 v22.7.0
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/kubernetes-csi/csi-lib-utils v0.24.0
 	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.82.1
@@ -15,7 +17,6 @@ require (
 )
 
 require (
-	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
