@@ -62,6 +62,13 @@ type Backend interface {
 	Name() string
 	// Schema returns the backend's option schema.
 	Schema() OptionSchema
+	// SourceModes returns the write-mode suffixes this backend accepts on
+	// sourceVolumes entries (e.g. "RW", "RO", "NC" for mergerfs) and the mode used
+	// for a bare entry with no suffix.
+	SourceModes() (modes []string, defaultMode string)
+	// MaxWritable caps the number of RW-mode sourceVolumes entries; 0 means
+	// unlimited. Overlay uses this to enforce its single-upperdir kernel limit.
+	MaxWritable() int
 	// Mount performs the union mount described by spec. Must be idempotent: callers
 	// check mountinfo first, but Mount may be called again after a driver restart.
 	Mount(ctx context.Context, spec MountSpec) error

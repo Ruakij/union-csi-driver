@@ -32,6 +32,18 @@ func (b *mergerfsBackend) Schema() backend.OptionSchema {
 	return backend.OptionSchema{}
 }
 
+// SourceModes: mergerfs's own branch mode tags, bare entry defaults to RW
+// (mergerfs's own union-mode default).
+func (b *mergerfsBackend) SourceModes() ([]string, string) {
+	return []string{"RW", "RO", "NC"}, "RW"
+}
+
+// MaxWritable is 0 (unlimited): any number of branches may be RW, category.create
+// arbitrates which one a new file lands on.
+func (b *mergerfsBackend) MaxWritable() int {
+	return 0
+}
+
 func (b *mergerfsBackend) Mount(ctx context.Context, spec backend.MountSpec) error {
 	return errors.New("mergerfs backend not implemented yet")
 }

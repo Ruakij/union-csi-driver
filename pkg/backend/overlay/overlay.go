@@ -31,6 +31,17 @@ func (b *overlayBackend) Schema() backend.OptionSchema {
 	return backend.OptionSchema{}
 }
 
+// SourceModes: bare entry defaults to RW (matching mergerfs, per .docs/changelog.md).
+func (b *overlayBackend) SourceModes() ([]string, string) {
+	return []string{"RW", "RO"}, "RW"
+}
+
+// MaxWritable is 1: overlay has exactly one upperdir, a real kernel limit, not an
+// arbitrary v1 cap.
+func (b *overlayBackend) MaxWritable() int {
+	return 1
+}
+
 func (b *overlayBackend) Mount(ctx context.Context, spec backend.MountSpec) error {
 	return errors.New("overlay backend not implemented yet")
 }
