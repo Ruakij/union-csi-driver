@@ -20,10 +20,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # {{version}} strips the leading v, so the image tag matches the appVersion the
+      # chart job stamps. The default here would be the raw ref, and the chart would
+      # point at a tag that was never pushed. major.minor and latest are skipped for
+      # prereleases by the action itself.
       - id: meta
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
       - uses: docker/build-push-action@v7
         with:
           context: .
