@@ -10,6 +10,9 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"k8s.io/klog/v2"
+	mount "k8s.io/mount-utils"
+
+	"github.com/Ruakij/union-csi-driver/pkg/volsource"
 )
 
 // Driver implements csi.IdentityServer and csi.NodeServer.
@@ -17,7 +20,9 @@ type Driver struct {
 	csi.UnimplementedIdentityServer
 	csi.UnimplementedNodeServer
 
-	config Config
+	config   Config
+	resolver *volsource.Resolver
+	mounter  mount.Interface
 }
 
 // New validates cfg and constructs a Driver.
@@ -37,12 +42,19 @@ func New(cfg Config) (*Driver, error) {
 	if cfg.Policy == nil {
 		return nil, errors.New("no option policy configured")
 	}
+	if cfg.KubeClient == nil {
+		return nil, errors.New("no kubernetes client configured")
+	}
 
 	klog.Infof("Driver: %v", cfg.DriverName)
 	klog.Infof("Version: %s", cfg.VendorVersion)
 	klog.Infof("Backend: %s", cfg.Backend.Name())
 
-	return &Driver{config: cfg}, nil
+	return &Driver{
+		config:   cfg,
+		resolver: volsource.NewResolver(cfg.KubeClient, cfg.KubeletRoot, cfg.DriverName),
+		mounter:  mount.New(""),
+	}, nil
 }
 
 // Run starts the gRPC server and blocks until stopCh fires.
