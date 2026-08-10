@@ -57,6 +57,9 @@ spec:
             - --endpoint=unix:///csi/csi.sock
             - --nodeid=$(KUBE_NODE_NAME)
             - --kubelet-root={{ $kubeletRoot }}
+            {{- if .Values.hostRootMount }}
+            - --host-root={{ .Values.hostRootDir }}
+            {{- end }}
             - --publish-timeout={{ .Values.publishTimeout }}
             - --max-source-volumes={{ .Values.maxSourceVolumes }}
             - --denylist-mode={{ .Values.options.denylistMode }}
@@ -91,6 +94,14 @@ spec:
             - name: plugins-dir
               mountPath: {{ $kubeletRoot }}/plugins
               mountPropagation: Bidirectional
+            {{- if .Values.hostRootMount }}
+            # hostPath sources are resolved against the host root; the mergerfs
+            # daemon shares this container's mount namespace, so it must see the
+            # same host-path view.
+            - name: host-root
+              mountPath: {{ .Values.hostRootDir }}
+              mountPropagation: Bidirectional
+            {{- end }}
             {{- if eq $backend "mergerfs" }}
             - name: dev-fuse
               mountPath: /dev/fuse
@@ -128,6 +139,15 @@ spec:
           hostPath:
             path: {{ $kubeletRoot }}/plugins
             type: Directory
+        {{- if .Values.hostRootMount }}
+        - name: host-root
+          hostPath:
+            # The host root itself. The driver needs write access so the merge
+            # and the hostPath sources' branches are reachable; the container is
+            # already privileged.
+            path: /
+            type: Directory
+        {{- end }}
         - name: registration-dir
           hostPath:
             path: {{ $kubeletRoot }}/plugins_registry

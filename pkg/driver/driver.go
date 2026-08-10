@@ -60,7 +60,7 @@ func New(cfg Config) (*Driver, error) {
 
 	return &Driver{
 		config:   cfg,
-		resolver: volsource.NewResolver(cfg.KubeClient, cfg.KubeletRoot, cfg.DriverName),
+		resolver: volsource.NewResolver(cfg.KubeClient, cfg.KubeletRoot, cfg.HostRoot, cfg.DriverName),
 		mounter:  mount.New(""),
 	}, nil
 }

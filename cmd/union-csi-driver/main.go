@@ -92,6 +92,7 @@ func main() {
 	flag.StringVar(&cfg.NodeID, "nodeid", "", "node id")
 	flag.StringVar(&backendName, "backend", "", fmt.Sprintf("merge backend to run (%s)", strings.Join(backend.Names(), ", ")))
 	flag.StringVar(&cfg.KubeletRoot, "kubelet-root", "/var/lib/kubelet", "path to the kubelet directory on this node")
+	flag.StringVar(&cfg.HostRoot, "host-root", "/host", "path where the node's root filesystem is bind-mounted inside this container (hostPath source volumes are mapped under it)")
 	flag.StringVar(&cfg.StateDir, "state-dir", "", "where the backend keeps per-volume node state (default: \"<kubelet-root>/plugins/<drivername>/state\")")
 	flag.DurationVar(&cfg.PublishTimeout, "publish-timeout", 30*time.Second, "how long NodePublishVolume waits for sibling volumes to become ready")
 	flag.IntVar(&cfg.MaxSourceVolumes, "max-source-volumes", 32, "maximum number of sourceVolumes entries accepted per volume")

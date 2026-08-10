@@ -30,27 +30,35 @@ func notReadyf(format string, args ...interface{}) error {
 
 // SourcePath is one resolved source: the pod volume name it came from, its
 // node-local path, and whether it is CSI-backed (must be polled as a real
-// mountpoint) or a plain directory (existence is enough).
+// mountpoint) or a plain directory (existence is enough). Root is the
+// containment base the path must sit under (kubelet's pod volumes dir, or the
+// host-root bind mount for hostPath).
 type SourcePath struct {
 	Name     string
 	Path     string
 	CSIBased bool
+	Root     string
 }
 
-// Resolver maps pod volume names to kubelet's on-disk publish paths.
+// Resolver maps pod volume names to paths the driver container can see.
 type Resolver struct {
 	client      kubernetes.Interface
 	kubeletRoot string
+	// hostRoot is where the node's real root filesystem is bind-mounted inside
+	// the driver container (--host-root, default /host). hostPath volume paths
+	// are mapped under it, since the DaemonSet mounts the host root there.
+	hostRoot string
 	// ownDriverName is this driver's own CSI driver name, used to refuse
 	// referencing another instance of this driver as a source (cycle guard).
 	ownDriverName string
 }
 
 // NewResolver builds a Resolver. kubeletRoot is the node's kubelet directory
-// (--kubelet-root, default /var/lib/kubelet). ownDriverName is the configured
-// --drivername, used for the cycle guard.
-func NewResolver(client kubernetes.Interface, kubeletRoot, ownDriverName string) *Resolver {
-	return &Resolver{client: client, kubeletRoot: kubeletRoot, ownDriverName: ownDriverName}
+// (--kubelet-root, default /var/lib/kubelet). hostRoot is where the host root
+// is bind-mounted in the container (--host-root, default /host). ownDriverName
+// is the configured --drivername, used for the cycle guard.
+func NewResolver(client kubernetes.Interface, kubeletRoot, hostRoot, ownDriverName string) *Resolver {
+	return &Resolver{client: client, kubeletRoot: kubeletRoot, hostRoot: hostRoot, ownDriverName: ownDriverName}
 }
 
 // Resolve maps each requested pod volume name to its kubelet publish path.
@@ -85,8 +93,10 @@ func (r *Resolver) Resolve(ctx context.Context, podNamespace, podName, podUID st
 			return nil, fmt.Errorf("sourceVolumes: %q: %w", name, err)
 		}
 
-		if err := assertContained(podVolumesRoot, sp.Path); err != nil {
-			return nil, fmt.Errorf("sourceVolumes: %q: %w", name, err)
+		if sp.Root != "" {
+			if err := assertContained(sp.Root, sp.Path); err != nil {
+				return nil, fmt.Errorf("sourceVolumes: %q: %w", name, err)
+			}
 		}
 
 		results = append(results, sp)
@@ -100,33 +110,83 @@ func (r *Resolver) resolveOne(ctx context.Context, podNamespace, podVolumesRoot 
 	case vol.PersistentVolumeClaim != nil:
 		return r.resolvePVC(ctx, podNamespace, podVolumesRoot, vol)
 
-	case vol.CSI != nil:
-		if vol.CSI.Driver == r.ownDriverName {
+	case vol.CSI != nil, vol.Ephemeral != nil:
+		if vol.CSI != nil && vol.CSI.Driver == r.ownDriverName {
 			return SourcePath{}, fmt.Errorf("refers to another %s volume in the same pod, which would create a mount cycle", r.ownDriverName)
 		}
 		return SourcePath{
 			Name:     vol.Name,
 			Path:     filepath.Join(podVolumesRoot, "kubernetes.io~csi", vol.Name, "mount"),
 			CSIBased: true,
+			Root:     podVolumesRoot,
 		}, nil
 
 	case vol.EmptyDir != nil:
 		return SourcePath{
 			Name: vol.Name,
 			Path: filepath.Join(podVolumesRoot, "kubernetes.io~empty-dir", vol.Name),
+			Root: podVolumesRoot,
 		}, nil
 
 	case vol.ConfigMap != nil:
-		return SourcePath{Name: vol.Name, Path: filepath.Join(podVolumesRoot, "kubernetes.io~configmap", vol.Name)}, nil
+		return SourcePath{Name: vol.Name, Path: filepath.Join(podVolumesRoot, "kubernetes.io~configmap", vol.Name), Root: podVolumesRoot}, nil
 
 	case vol.Secret != nil:
-		return SourcePath{Name: vol.Name, Path: filepath.Join(podVolumesRoot, "kubernetes.io~secret", vol.Name)}, nil
+		return SourcePath{Name: vol.Name, Path: filepath.Join(podVolumesRoot, "kubernetes.io~secret", vol.Name), Root: podVolumesRoot}, nil
 
 	case vol.DownwardAPI != nil:
-		return SourcePath{Name: vol.Name, Path: filepath.Join(podVolumesRoot, "kubernetes.io~downward-api", vol.Name)}, nil
+		return SourcePath{Name: vol.Name, Path: filepath.Join(podVolumesRoot, "kubernetes.io~downward-api", vol.Name), Root: podVolumesRoot}, nil
 
 	case vol.Projected != nil:
-		return SourcePath{Name: vol.Name, Path: filepath.Join(podVolumesRoot, "kubernetes.io~projected", vol.Name)}, nil
+		return SourcePath{Name: vol.Name, Path: filepath.Join(podVolumesRoot, "kubernetes.io~projected", vol.Name), Root: podVolumesRoot}, nil
+
+	case vol.HostPath != nil:
+		// hostPath paths are host-absolute; the DaemonSet bind-mounts the host
+		// root at hostRoot, so map the path under it to make it visible to the
+		// driver container (and to the mergerfs daemon, which shares its mount
+		// namespace). Relative hostPath paths are a kubelet edge case; normalize
+		// against the host root first.
+		host := vol.HostPath.Path
+		if !filepath.IsAbs(host) {
+			host = filepath.Join("/", host)
+		}
+		return SourcePath{
+			Name: vol.Name,
+			Path: filepath.Join(r.hostRoot, host),
+			Root: r.hostRoot,
+		}, nil
+
+	case vol.NFS != nil:
+		return SourcePath{
+			Name:     vol.Name,
+			Path:     filepath.Join(podVolumesRoot, "kubernetes.io~nfs", vol.Name),
+			CSIBased: true,
+			Root:     podVolumesRoot,
+		}, nil
+
+	case vol.ISCSI != nil:
+		return SourcePath{
+			Name:     vol.Name,
+			Path:     filepath.Join(podVolumesRoot, "kubernetes.io~iscsi", vol.Name),
+			CSIBased: true,
+			Root:     podVolumesRoot,
+		}, nil
+
+	case vol.FC != nil:
+		return SourcePath{
+			Name:     vol.Name,
+			Path:     filepath.Join(podVolumesRoot, "kubernetes.io~fc", vol.Name),
+			CSIBased: true,
+			Root:     podVolumesRoot,
+		}, nil
+
+	case vol.Image != nil:
+		return SourcePath{
+			Name:     vol.Name,
+			Path:     filepath.Join(podVolumesRoot, "kubernetes.io~image", vol.Name),
+			CSIBased: true,
+			Root:     podVolumesRoot,
+		}, nil
 
 	default:
 		return SourcePath{}, fmt.Errorf("unsupported volume source")
@@ -161,6 +221,7 @@ func (r *Resolver) resolvePVC(ctx context.Context, podNamespace, podVolumesRoot 
 		Name:     vol.Name,
 		Path:     filepath.Join(podVolumesRoot, "kubernetes.io~csi", pv.Name, "mount"),
 		CSIBased: true,
+		Root:     podVolumesRoot,
 	}, nil
 }
 

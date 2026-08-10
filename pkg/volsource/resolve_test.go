@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
@@ -17,6 +18,7 @@ const (
 	testPod         = "app"
 	testUID         = "pod-uid-1"
 	testKubeletRoot = "/var/lib/kubelet"
+	testHostRoot    = "/host"
 	testDriverName  = "mergerfs.csi.ruekov.eu"
 )
 
@@ -45,7 +47,7 @@ func TestResolvePVC(t *testing.T) {
 	}
 
 	client := fake.NewSimpleClientset(pod, pvc, pv)
-	r := NewResolver(client, testKubeletRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
 	if err != nil {
@@ -69,7 +71,7 @@ func TestResolveInlineCSI(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(pod)
-	r := NewResolver(client, testKubeletRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"scratch"})
 	if err != nil {
@@ -93,7 +95,7 @@ func TestResolveEmptyDir(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(pod)
-	r := NewResolver(client, testKubeletRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"cache"})
 	if err != nil {
@@ -115,7 +117,7 @@ func TestResolveConfigMap(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(pod)
-	r := NewResolver(client, testKubeletRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"cfg"})
 	if err != nil {
@@ -143,7 +145,7 @@ func TestResolveUnboundPVCIsRetryable(t *testing.T) {
 		// VolumeName intentionally empty: unbound.
 	}
 	client := fake.NewSimpleClientset(pod, pvc)
-	r := NewResolver(client, testKubeletRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
 	var notReady *NotReadyError
@@ -174,7 +176,7 @@ func TestResolveNonCSIPVRejected(t *testing.T) {
 		}},
 	}
 	client := fake.NewSimpleClientset(pod, pvc, pv)
-	r := NewResolver(client, testKubeletRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
 	if err == nil {
@@ -192,7 +194,7 @@ func TestResolveMissingVolumeName(t *testing.T) {
 		Spec:       corev1.PodSpec{Volumes: []corev1.Volume{}},
 	}
 	client := fake.NewSimpleClientset(pod)
-	r := NewResolver(client, testKubeletRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"missing"})
 	if err == nil {
@@ -222,7 +224,7 @@ func TestResolveContainment(t *testing.T) {
 		Spec:       corev1.PersistentVolumeSpec{PersistentVolumeSource: corev1.PersistentVolumeSource{CSI: &corev1.CSIPersistentVolumeSource{Driver: "some.csi.driver"}}},
 	}
 	client := fake.NewSimpleClientset(pod, pvc, pv)
-	r := NewResolver(client, testKubeletRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
 	if err == nil {
@@ -236,7 +238,7 @@ func TestResolvePodUIDMismatch(t *testing.T) {
 		Spec:       corev1.PodSpec{Volumes: []corev1.Volume{}},
 	}
 	client := fake.NewSimpleClientset(pod)
-	r := NewResolver(client, testKubeletRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"x"})
 	if err == nil {
@@ -256,10 +258,195 @@ func TestResolveCycleGuard(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(pod)
-	r := NewResolver(client, testKubeletRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"other-merge"})
 	if err == nil {
 		t.Fatal("Resolve() = nil, want error referencing another of this driver's own volumes as a source")
+	}
+}
+
+func TestResolveHostPath(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: testPod, Namespace: testNamespace, UID: types.UID(testUID)},
+		Spec: corev1.PodSpec{
+			Volumes: []corev1.Volume{
+				{Name: "data", VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{Path: "/opt/data"},
+				}},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset(pod)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"data"})
+	if err != nil {
+		t.Fatalf("Resolve() unexpected error: %v", err)
+	}
+	wantPath := filepath.Join(testHostRoot, "opt", "data")
+	if len(got) != 1 || got[0].Path != wantPath || got[0].CSIBased || got[0].Root != testHostRoot {
+		t.Fatalf("Resolve() = %+v, want path=%s CSIBased=false Root=%s", got, wantPath, testHostRoot)
+	}
+}
+
+func TestResolveHostPathRelative(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: testPod, Namespace: testNamespace, UID: types.UID(testUID)},
+		Spec: corev1.PodSpec{
+			Volumes: []corev1.Volume{
+				{Name: "data", VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{Path: "opt/data"},
+				}},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset(pod)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"data"})
+	if err != nil {
+		t.Fatalf("Resolve() unexpected error: %v", err)
+	}
+	wantPath := filepath.Join(testHostRoot, "opt", "data")
+	if len(got) != 1 || got[0].Path != wantPath || got[0].Root != testHostRoot {
+		t.Fatalf("Resolve() = %+v, want path=%s Root=%s", got, wantPath, testHostRoot)
+	}
+}
+
+func TestResolveEphemeral(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: testPod, Namespace: testNamespace, UID: types.UID(testUID)},
+		Spec: corev1.PodSpec{
+			Volumes: []corev1.Volume{
+				{Name: "scratch", VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
+								StorageClassName: func() *string { s := "hostpath"; return &s }(),
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse("1Gi"),
+									},
+								},
+							},
+						},
+					},
+				}},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset(pod)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"scratch"})
+	if err != nil {
+		t.Fatalf("Resolve() unexpected error: %v", err)
+	}
+	want := filepath.Join(podVolumesRoot(), "kubernetes.io~csi", "scratch", "mount")
+	if len(got) != 1 || got[0].Path != want || !got[0].CSIBased {
+		t.Fatalf("Resolve() = %+v, want path %q CSIBased=true", got, want)
+	}
+}
+
+func TestResolveNFS(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: testPod, Namespace: testNamespace, UID: types.UID(testUID)},
+		Spec: corev1.PodSpec{
+			Volumes: []corev1.Volume{
+				{Name: "nfs", VolumeSource: corev1.VolumeSource{
+					NFS: &corev1.NFSVolumeSource{Server: "nfs.example.com", Path: "/export"},
+				}},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset(pod)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"nfs"})
+	if err != nil {
+		t.Fatalf("Resolve() unexpected error: %v", err)
+	}
+	want := filepath.Join(podVolumesRoot(), "kubernetes.io~nfs", "nfs")
+	if len(got) != 1 || got[0].Path != want || !got[0].CSIBased {
+		t.Fatalf("Resolve() = %+v, want path %q CSIBased=true", got, want)
+	}
+}
+
+func TestResolveISCSI(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: testPod, Namespace: testNamespace, UID: types.UID(testUID)},
+		Spec: corev1.PodSpec{
+			Volumes: []corev1.Volume{
+				{Name: "iscsi", VolumeSource: corev1.VolumeSource{
+					ISCSI: &corev1.ISCSIVolumeSource{
+						TargetPortal: "10.0.0.1:3260",
+						IQN:          "iqn.2001-04.com.example",
+						Lun:          0,
+					},
+				}},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset(pod)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"iscsi"})
+	if err != nil {
+		t.Fatalf("Resolve() unexpected error: %v", err)
+	}
+	want := filepath.Join(podVolumesRoot(), "kubernetes.io~iscsi", "iscsi")
+	if len(got) != 1 || got[0].Path != want || !got[0].CSIBased {
+		t.Fatalf("Resolve() = %+v, want path %q CSIBased=true", got, want)
+	}
+}
+
+func TestResolveFC(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: testPod, Namespace: testNamespace, UID: types.UID(testUID)},
+		Spec: corev1.PodSpec{
+			Volumes: []corev1.Volume{
+				{Name: "fc", VolumeSource: corev1.VolumeSource{
+					FC: &corev1.FCVolumeSource{TargetWWNs: []string{"500a0982991b8dc5"}},
+				}},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset(pod)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"fc"})
+	if err != nil {
+		t.Fatalf("Resolve() unexpected error: %v", err)
+	}
+	want := filepath.Join(podVolumesRoot(), "kubernetes.io~fc", "fc")
+	if len(got) != 1 || got[0].Path != want || !got[0].CSIBased {
+		t.Fatalf("Resolve() = %+v, want path %q CSIBased=true", got, want)
+	}
+}
+
+func TestResolveImage(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: testPod, Namespace: testNamespace, UID: types.UID(testUID)},
+		Spec: corev1.PodSpec{
+			Volumes: []corev1.Volume{
+				{Name: "img", VolumeSource: corev1.VolumeSource{
+					Image: &corev1.ImageVolumeSource{
+						Reference: "nginx:latest",
+					},
+				}},
+			},
+		},
+	}
+	client := fake.NewSimpleClientset(pod)
+	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"img"})
+	if err != nil {
+		t.Fatalf("Resolve() unexpected error: %v", err)
+	}
+	want := filepath.Join(podVolumesRoot(), "kubernetes.io~image", "img")
+	if len(got) != 1 || got[0].Path != want || !got[0].CSIBased {
+		t.Fatalf("Resolve() = %+v, want path %q CSIBased=true", got, want)
 	}
 }
