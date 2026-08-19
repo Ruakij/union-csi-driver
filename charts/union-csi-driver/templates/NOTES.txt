@@ -10,6 +10,8 @@ Pods request a merged mount by naming their own sibling volumes:
           sourceVolumes: "data=RW,archive=RO"
 
 sourceVolumes entries are volume names from the same pod, leftmost wins on lookup.
+Each source volume must also be listed in some container's volumeMounts: kubelet
+only sets up volumes a container mounts.
 {{- if eq (include "union-csi-driver.backend" .) "overlay" }}
 The overlay backend accepts at most one =RW entry and it must be listed first: the
 kernel always stacks the single upperdir on top. Its merged content lives in

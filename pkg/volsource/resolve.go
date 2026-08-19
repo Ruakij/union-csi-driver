@@ -78,6 +78,7 @@ func (r *Resolver) Resolve(ctx context.Context, podNamespace, podName, podUID st
 	for _, v := range pod.Spec.Volumes {
 		byName[v.Name] = v
 	}
+	referenced := referencedVolumes(pod)
 
 	podVolumesRoot := filepath.Join(r.kubeletRoot, "pods", podUID, "volumes")
 
@@ -86,6 +87,12 @@ func (r *Resolver) Resolve(ctx context.Context, podNamespace, podName, podUID st
 		vol, ok := byName[name]
 		if !ok {
 			return nil, fmt.Errorf("sourceVolumes: pod volume %q not found in pod spec", name)
+		}
+
+		// Kubelet skips volumes no container references, so such a source never
+		// gets set up and waiting for it can only time out.
+		if _, used := referenced[name]; !used {
+			return nil, fmt.Errorf("sourceVolumes: pod volume %q is not mounted by any container in this pod, so kubelet never sets it up; add a volumeMount for it in any container", name)
 		}
 
 		sp, err := r.resolveOne(ctx, podNamespace, podVolumesRoot, vol)
@@ -103,6 +110,30 @@ func (r *Resolver) Resolve(ctx context.Context, podNamespace, podName, podUID st
 	}
 
 	return results, nil
+}
+
+// referencedVolumes collects the pod volume names some container mounts, using
+// the same containers kubelet consults when deciding which volumes to set up.
+func referencedVolumes(pod *corev1.Pod) map[string]struct{} {
+	refs := make(map[string]struct{}, len(pod.Spec.Volumes))
+	add := func(mounts []corev1.VolumeMount, devices []corev1.VolumeDevice) {
+		for _, m := range mounts {
+			refs[m.Name] = struct{}{}
+		}
+		for _, d := range devices {
+			refs[d.Name] = struct{}{}
+		}
+	}
+	for _, c := range pod.Spec.InitContainers {
+		add(c.VolumeMounts, c.VolumeDevices)
+	}
+	for _, c := range pod.Spec.Containers {
+		add(c.VolumeMounts, c.VolumeDevices)
+	}
+	for _, c := range pod.Spec.EphemeralContainers {
+		add(c.VolumeMounts, c.VolumeDevices)
+	}
+	return refs
 }
 
 func (r *Resolver) resolveOne(ctx context.Context, podNamespace, podVolumesRoot string, vol corev1.Volume) (SourcePath, error) {

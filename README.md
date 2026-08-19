@@ -51,6 +51,13 @@ to the node's real kubelet directory.
 ## Use
 
 ```yaml
+containers:
+  - name: app
+    image: alpine
+    volumeMounts:
+      - {name: merged, mountPath: /merged}
+      - {name: data, mountPath: /sources/data}
+      - {name: archive, mountPath: /sources/archive}
 volumes:
   - name: data
     persistentVolumeClaim: {claimName: data}
@@ -62,6 +69,11 @@ volumes:
       volumeAttributes:
         sourceVolumes: "data=RW,archive=RO"
 ```
+
+Every source volume needs a `volumeMounts` entry in some container of the pod, even if
+nothing reads it there: kubelet only sets up volumes a container mounts, so an
+unreferenced source never appears on the node. The driver rejects the union volume with
+a clear error instead of waiting for a source that will never arrive.
 
 `sourceVolumes` names volumes of the same pod. Leftmost wins on lookup, and the mode
 suffix says whether writes may land there: `RW`, `RO`, or (mergerfs only) `NC`. A bare
