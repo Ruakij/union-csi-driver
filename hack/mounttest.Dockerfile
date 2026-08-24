@@ -4,6 +4,6 @@
 ARG MERGERFS_IMAGE
 FROM ${MERGERFS_IMAGE} AS mergerfs
 
-FROM golang:1.26-alpine
+FROM golang:1.27-alpine
 RUN apk add --no-cache fuse
 COPY --from=mergerfs /mergerfs/usr/local/bin/mergerfs /usr/local/bin/mergerfs

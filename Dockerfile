@@ -14,7 +14,7 @@
 
 # Cross-compiling from the build platform, so a multi-arch build needs no
 # emulated toolchain.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETARCH
 ARG version=""
 WORKDIR /src
