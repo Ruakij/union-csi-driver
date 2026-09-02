@@ -14,7 +14,7 @@ image:
 registrar:
   image:
     repository: registry.k8s.io/sig-storage/csi-node-driver-registrar
-    tag: v2.13.0
+    tag: v2.17.0
     pullPolicy: IfNotPresent
 
 # Presets: k3s and RKE2 use /var/lib/kubelet by default but k3s installs that as a
