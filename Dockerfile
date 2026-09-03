@@ -47,7 +47,7 @@ LABEL description="union-csi-driver"
 # mergerfs and fusermount ship in every image regardless of --backend: the
 # container is privileged either way, so a binary the overlay backend never execs
 # is not meaningful attack surface, and it keeps this to one build lane.
-RUN apk add --no-cache util-linux coreutils fuse && apk update && apk upgrade
+RUN apk add --no-cache util-linux coreutils fuse
 COPY --from=mergerfs /mergerfs/usr/local/bin/mergerfs /usr/local/bin/mergerfs
 COPY --from=build /out/union-csi-driver /union-csi-driver
 ENTRYPOINT ["/union-csi-driver"]

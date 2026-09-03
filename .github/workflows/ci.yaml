@@ -99,6 +99,9 @@ jobs:
           load: true
           tags: union-csi-driver:ci
       - uses: aquasecurity/trivy-action@v0.36.0
+        # The yaml ignore file is not one of the paths trivy picks up on its own
+        env:
+          TRIVY_IGNOREFILE: .trivyignore.yaml
         with:
           image-ref: union-csi-driver:ci
           format: table
