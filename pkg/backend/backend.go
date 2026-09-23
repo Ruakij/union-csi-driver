@@ -15,7 +15,7 @@ const (
 	ValueEnum
 	// ValueBool options take "true" or "false".
 	ValueBool
-	// ValueDuration options take a Go duration string.
+	// ValueDuration options take whole seconds, as mergerfs does.
 	ValueDuration
 	// ValueInt options take a bounded integer (Spec.MinInt..Spec.MaxInt).
 	ValueInt
