@@ -8,6 +8,8 @@
   body { font-family: system-ui, sans-serif; max-width: 46rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.6; }
   pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; border-radius: 6px; }
   code { font-family: ui-monospace, monospace; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .35rem .75rem .35rem 0; border-bottom: 1px solid #ddd; }
 </style>
 </head>
 <body>
@@ -25,7 +27,28 @@ helm install mergerfs-csi union-csi/union-csi-driver --set backend=mergerfs</cod
 <code>oci://ghcr.io/ruakij/charts/union-csi-driver</code>, which is where prereleases go.
 The index here lists stable releases only.</p>
 
+<h2>Releases</h2>
+<p id="releases">See <a href="https://github.com/Ruakij/union-csi-driver/releases">GitHub releases</a>.</p>
+
 <p>See the <a href="https://github.com/Ruakij/union-csi-driver#readme">README</a> for
 configuration and the differences between the two backends.</p>
+<script>
+// Reads the chart index served next to this page, so the list follows each release.
+fetch("index.yaml").then(r => r.text()).then(text => {
+  const field = (entry, name) => (entry.match(new RegExp("\\n    " + name + ": \"?([^\"\\n]*)")) || [])[1] || "";
+  const rows = text.split(/\n  - /).slice(1).map(entry => {
+    entry = "\n    " + entry;
+    const version = field(entry, "version");
+    const tag = "v" + version;
+    return `<tr><td><a href="https://github.com/Ruakij/union-csi-driver/releases/tag/${tag}">${version}</a></td>` +
+      `<td><code>ghcr.io/ruakij/union-csi-driver:${field(entry, "appVersion")}</code></td>` +
+      `<td>${field(entry, "created").slice(0, 10)}</td></tr>`;
+  });
+  if (rows.length) {
+    document.getElementById("releases").outerHTML =
+      "<table><tr><th>Chart</th><th>Image</th><th>Released</th></tr>" + rows.join("") + "</table>";
+  }
+});
+</script>
 </body>
 </html>
