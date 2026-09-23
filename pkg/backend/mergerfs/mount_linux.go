@@ -26,6 +26,7 @@ const (
 	mountWaitTimeout  = 30 * time.Second
 	mountPollInterval = 100 * time.Millisecond
 	reconcileInterval = 30 * time.Second
+	minReconcileGap   = time.Second
 
 	// fuseSuperMagic identifies a FUSE mount in statfs, which is what confirms
 	// mergerfs actually took over the target rather than merely starting.
@@ -79,6 +80,12 @@ func startDaemon(ctx context.Context, volumeID, target string, argv []string) er
 		return err
 	}
 	klog.V(4).Infof("mergerfs: mounted %s (pid %d)", target, cmd.Process.Pid)
+	// Deliberately not bound to ctx, which belongs to the publish request: the
+	// daemon outlives it, and so must the watch on its exit.
+	go func() {
+		<-exited
+		requestReconcile()
+	}()
 	return nil
 }
 

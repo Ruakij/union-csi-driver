@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -20,6 +21,45 @@ import (
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
+
+// Runs before any test here mounts, so no earlier scope's exit can pose as the wake.
+func TestWatchScopesWakesOnScopeStop(t *testing.T) {
+	if !systemdAvailable() {
+		if os.Getenv("MOUNTTEST_SYSTEMD") != "" {
+			t.Fatal("MOUNTTEST_SYSTEMD is set but host systemd is unreachable")
+		}
+		t.Skip("no host systemd; see make test-mount-systemd")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := adoptIntoScope(ctx, scopeUnitName("vol-watch"), cmd.Process.Pid); err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatal(err)
+	}
+
+	woken := make(chan struct{}, 1)
+	if err := watchScopes(ctx, func() {
+		select {
+		case woken <- struct{}{}:
+		default:
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+
+	select {
+	case <-woken:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no wake after the scope's process died")
+	}
+}
 
 func makeSource(t *testing.T, root, name string, files map[string]string) string {
 	t.Helper()
@@ -173,6 +213,34 @@ func TestReconcileRemountsADeadMount(t *testing.T) {
 
 	if !isFUSEMount(target) {
 		t.Fatal("target was not remounted by reconcileOnce")
+	}
+	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
+}
+
+func waitRemounted(t *testing.T, target string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !isFUSEMount(target) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s was not remounted within 10s", target)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Both remounts land well inside reconcileInterval, so the ticker cannot be what
+// drives them.
+func TestReconcileRemountsOnDaemonExit(t *testing.T) {
+	target, stateDir, _, _ := newMount(t, "vol-event")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go reconcile(ctx, stateDir)
+
+	// The first remount may come from the loop's initial pass; the second only
+	// from the exit of the daemon that the first remount started.
+	for range 2 {
+		killDaemon(t, target)
+		waitRemounted(t, target)
 	}
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
 }

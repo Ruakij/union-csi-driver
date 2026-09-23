@@ -55,5 +55,11 @@ test-mount-image:
 
 .PHONY: test-mount
 test-mount: test-mount-image
-	docker run --rm --privileged -v $(CURDIR):/src -w /src -e GOFLAGS=-buildvcs=false \
+	docker run --rm --privileged $(MOUNTTEST_DOCKER_FLAGS) -v $(CURDIR):/src -w /src -e GOFLAGS=-buildvcs=false \
 		$(MOUNTTEST_IMAGE) go test -tags mounttest -count=1 $(MOUNTTEST_PKGS)
+
+# The same tests with the host's systemd handed in, as the chart does, so mergerfs
+# daemons are adopted into host scopes. Needs a Docker host that runs systemd.
+.PHONY: test-mount-systemd
+test-mount-systemd:
+	$(MAKE) test-mount MOUNTTEST_DOCKER_FLAGS="--pid=host -v /run/systemd:/run/systemd -e MOUNTTEST_SYSTEMD=1"

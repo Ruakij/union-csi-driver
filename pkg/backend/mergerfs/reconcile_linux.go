@@ -8,28 +8,92 @@ import (
 	"os"
 	"time"
 
+	systemd "github.com/coreos/go-systemd/v22/dbus"
 	"golang.org/x/sys/unix"
 	"k8s.io/klog/v2"
 )
 
+// wakeReconcile cuts the wait for the next reconcile pass short. It holds at most
+// one pending wake, so bursts of daemon exits collapse into a single pass.
+var wakeReconcile = make(chan struct{}, 1)
+
+func requestReconcile() {
+	select {
+	case wakeReconcile <- struct{}{}:
+	default:
+	}
+}
+
 // reconcile repairs mounts whose daemon died: with the driver pod where there is
-// no host systemd, or by crashing or being OOM-killed anywhere.
+// no host systemd, or by crashing or being OOM-killed anywhere. A pass runs as
+// soon as a daemon exits, with the ticker as a backstop for missed events.
 func reconcile(ctx context.Context, stateDir string) {
 	if !systemdAvailable() {
-		klog.Warningf("mergerfs: running without host systemd; mergerfs daemons die with this pod and are remounted every %s. "+
-			"Consumers holding open file descriptors across a restart keep seeing ENOTCONN until they reopen the file", reconcileInterval)
+		klog.Warning("mergerfs: running without host systemd; mergerfs daemons die with this pod and are remounted when it restarts. " +
+			"Consumers holding open file descriptors across a restart keep seeing ENOTCONN until they reopen the file")
+	} else if err := watchScopes(ctx, requestReconcile); err != nil {
+		klog.Warningf("mergerfs: cannot watch host systemd for daemon exits (%v); "+
+			"daemons started by an earlier driver pod are remounted within %s of dying", err, reconcileInterval)
 	}
 
 	tick := time.NewTicker(reconcileInterval)
 	defer tick.Stop()
+	var last time.Time
 	for {
+		// A daemon that dies right after mounting must not turn the wake into a
+		// tight remount loop.
+		if wait := minReconcileGap - time.Since(last); wait > 0 {
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return
+			}
+		}
+		last = time.Now()
 		reconcileOnce(ctx, stateDir)
 		select {
 		case <-tick.C:
+		case <-wakeReconcile:
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+// watchScopes calls wake whenever a daemon's scope stops. Daemons started by this
+// driver pod are also its children and report their own exit, but those started
+// by an earlier pod are only visible to host systemd.
+func watchScopes(ctx context.Context, wake func()) error {
+	conn, err := systemd.NewSystemdConnectionContext(ctx)
+	if err != nil {
+		return err
+	}
+	updates := make(chan *systemd.PropertiesUpdate, 64)
+	// Receives an error when updates overflowed and events were dropped.
+	dropped := make(chan error, 1)
+	conn.SetPropertiesSubscriber(updates, dropped)
+	if err := conn.Subscribe(); err != nil {
+		conn.Close()
+		return err
+	}
+
+	go func() {
+		defer conn.Close()
+		for {
+			select {
+			case u := <-updates:
+				state, ok := u.Changed["ActiveState"]
+				if ok && isScopeUnit(u.UnitName) && state.Value() != "active" {
+					wake()
+				}
+			case <-dropped:
+				wake()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return nil
 }
 
 func reconcileOnce(ctx context.Context, stateDir string) {

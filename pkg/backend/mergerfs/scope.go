@@ -6,7 +6,16 @@ import "strings"
 // so cleanup after a driver restart needs no bookkeeping: the volume ID from
 // NodeUnpublishVolume is enough to name the unit again.
 func scopeUnitName(volumeID string) string {
-	return "union-csi-" + sanitizeUnitName(volumeID) + ".scope"
+	return scopePrefix + sanitizeUnitName(volumeID) + scopeSuffix
+}
+
+const (
+	scopePrefix = "union-csi-"
+	scopeSuffix = ".scope"
+)
+
+func isScopeUnit(name string) bool {
+	return strings.HasPrefix(name, scopePrefix) && strings.HasSuffix(name, scopeSuffix)
 }
 
 // sanitizeUnitName keeps only characters valid in a systemd unit name. CSI volume
