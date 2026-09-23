@@ -28,6 +28,14 @@ func mountUnion(spec backend.MountSpec, schema backend.OptionSchema) error {
 		defer ws.close()
 		l.upper, l.work = ws.upper, ws.work
 	}
+	for i, dir := range l.lowers {
+		fd, err := openLayer(dir, unix.O_PATH)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = unix.Close(fd) }()
+		l.lowers[i] = fdPath(fd)
+	}
 
 	if dir := l.single(); dir != "" {
 		return bindMount(dir, spec.Target, l.readOnly)
@@ -45,6 +53,24 @@ func mountUnion(spec backend.MountSpec, schema backend.OptionSchema) error {
 	return nil
 }
 
+// openLayer opens a resolved source directory, refusing symlinks anywhere in its
+// path, so a directory swapped for a link after the source was checked is not
+// followed. The mount is given the fd's /proc/self/fd path.
+func openLayer(dir string, flags int) (int, error) {
+	how := &unix.OpenHow{Flags: uint64(flags | unix.O_DIRECTORY | unix.O_CLOEXEC), Resolve: unix.RESOLVE_NO_SYMLINKS}
+	fd, err := unix.Openat2(unix.AT_FDCWD, dir, how)
+	if err == unix.ENOSYS {
+		// Before Linux 5.6 only the last component can be checked.
+		fd, err = unix.Open(dir, flags|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	}
+	if err != nil {
+		return -1, fmt.Errorf("overlay: open %s: %w", dir, err)
+	}
+	return fd, nil
+}
+
+func fdPath(fd int) string { return fmt.Sprintf("/proc/self/fd/%d", fd) }
+
 // workspace holds the RW volume's upper and work directories open. The mount is
 // given their /proc/self/fd paths, so it uses exactly the directories checked
 // here even if the volume is changed in between.
@@ -54,9 +80,9 @@ type workspace struct {
 }
 
 func openWorkspace(root string) (*workspace, error) {
-	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	rootFD, err := openLayer(root, unix.O_RDONLY)
 	if err != nil {
-		return nil, fmt.Errorf("overlay: open %s: %w", root, err)
+		return nil, err
 	}
 	defer func() { _ = unix.Close(rootFD) }()
 	if err := checkUpperFS(rootFD, root); err != nil {
@@ -78,8 +104,7 @@ func openWorkspace(root string) (*workspace, error) {
 		}
 		ws.fds = append(ws.fds, fd)
 	}
-	ws.upper = fmt.Sprintf("/proc/self/fd/%d", ws.fds[0])
-	ws.work = fmt.Sprintf("/proc/self/fd/%d", ws.fds[1])
+	ws.upper, ws.work = fdPath(ws.fds[0]), fdPath(ws.fds[1])
 	return ws, nil
 }
 

@@ -292,6 +292,33 @@ func TestMountRefusesSymlinkedWorkspace(t *testing.T) {
 	}
 }
 
+// Sources are resolved and checked before the mount, so a symlink found in their
+// path at mount time was swapped in since.
+func TestMountRefusesSymlinkedSource(t *testing.T) {
+	for _, mode := range []string{modeRW, modeRO} {
+		t.Run(mode, func(t *testing.T) {
+			ws := newWorkspace(t)
+			ro := makeSource(t, ws, "ro", map[string]string{"lower.txt": "from-lower"})
+			makeSource(t, ws, "elsewhere", map[string]string{"secret.txt": "secret"})
+			if err := os.Symlink(filepath.Join(ws, "elsewhere"), filepath.Join(ws, "link")); err != nil {
+				t.Fatal(err)
+			}
+			target := makeTarget(t, ws)
+
+			be := newBackend(t)
+			spec := backend.MountSpec{
+				VolumeID: "vol-swapped",
+				Target:   target,
+				Sources:  []backend.Source{{Path: filepath.Join(ws, "link"), Mode: mode}, {Path: ro, Mode: modeRO}},
+				Options:  be.DefaultOptions(),
+			}
+			if err := be.Mount(context.Background(), spec); err == nil {
+				t.Fatal("Mount succeeded with a symlinked source, want an error")
+			}
+		})
+	}
+}
+
 func TestMountRefusesUnsupportedUpperFS(t *testing.T) {
 	root := t.TempDir()
 	var st unix.Statfs_t

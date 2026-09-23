@@ -127,7 +127,9 @@ Only CSI ephemeral inline volumes are supported. For each union volume, kubelet 
 5. Mounts the union at the target path:
    - **overlay**: a kernel overlay mount through the `fsopen`/`fsconfig` API where
      available (one argument per layer, no option-length limit), otherwise classic
-     `mount(2)`. A single source becomes a bind mount.
+     `mount(2)`. A single source becomes a bind mount. Every layer is opened
+     without following symlinks and handed to the kernel by file descriptor, so
+     what gets mounted is the directory that was checked.
    - **mergerfs**: starts the `mergerfs` daemon without a shell, in a sandbox
      (`mergerfs.sandbox`): new mount and PID namespaces whose read-only tmpfs root
      holds only the branches at `/branch/<n>`, the target at `/union`, `/dev/fuse`,
