@@ -14,3 +14,6 @@ spec:
   podInfoOnMount: true
   volumeLifecycleModes:
     - Ephemeral
+  # A recursive fsGroup chown of the merge would write through into every source
+  # volume.
+  fsGroupPolicy: None
