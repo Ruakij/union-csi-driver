@@ -70,3 +70,4 @@ FUZZTIME ?= 30s
 .PHONY: fuzz
 fuzz:
 	go test -run '^$$' -fuzz FuzzParseAttributes -fuzztime $(FUZZTIME) ./pkg/driver
+	go test -run '^$$' -fuzz FuzzRealPath -fuzztime $(FUZZTIME) ./pkg/volsource
