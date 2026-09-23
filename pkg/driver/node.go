@@ -121,7 +121,9 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 	if err := d.config.Backend.Unmount(ctx, req.GetVolumeId(), req.GetTargetPath()); err != nil {
 		return nil, status.Errorf(codes.Internal, "unmount: %v", err)
 	}
-	if err := os.RemoveAll(req.GetTargetPath()); err != nil {
+	// Not RemoveAll: if the target is still mounted, that would delete through the
+	// merge into the source volumes. Failing lets kubelet retry the unpublish.
+	if err := os.Remove(req.GetTargetPath()); err != nil && !os.IsNotExist(err) {
 		return nil, status.Errorf(codes.Internal, "remove target path: %v", err)
 	}
 
