@@ -60,11 +60,11 @@ The usual workaround is a separate service installed on the host, such as
 Here, nothing has to be installed on the node. Union volumes stay up across a driver
 restart, upgrade or eviction:
 
-| Backend                   | Driver pod restarts                                                 |
-| ------------------------- | ------------------------------------------------------------------- |
-| overlay                   | Unaffected: a kernel mount with no process behind it.               |
-| mergerfs, host systemd    | Unaffected: the daemon belongs to host systemd, not the driver pod. |
-| mergerfs, no host systemd | Remounted within 30s; open file descriptors see `ENOTCONN`.         |
+| Backend                   | Driver pod restarts                                                 | Daemon crash or OOM kill                                    |
+| ------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------- |
+| overlay                   | Unaffected: a kernel mount with no process behind it.               | No daemon.                                                  |
+| mergerfs, host systemd    | Unaffected: the daemon belongs to host systemd, not the driver pod. | Remounted within 30s; open file descriptors see `ENOTCONN`. |
+| mergerfs, no host systemd | Remounted within 30s; open file descriptors see `ENOTCONN`.         | Remounted within 30s; open file descriptors see `ENOTCONN`. |
 
 - **overlay** mounts are created in the host's mount namespace through the
   `Bidirectional` kubelet pods mount, so they live on regardless of the driver pod.
@@ -75,14 +75,16 @@ restart, upgrade or eviction:
   to host systemd, not the driver pod's cgroup. The scope name is derived from the
   volume ID, so a restarted driver still finds and stops it on unmount.
 - **mergerfs without systemd** (Talos, other non-systemd nodes, or
-  `mergerfs.daemonLifetime=in-container`): daemons die with the driver pod. Each
-  daemon's target and exact argv are recorded in
-  `<kubeletRoot>/plugins/<driverName>/state/<volumeID>.json` before it starts. On
-  startup and every 30s after, dead mounts are restarted from that record and records
-  of targets kubelet has removed are dropped. The mount comes back at the same path, but
-  file descriptors opened before the restart keep returning `ENOTCONN` until the
-  workload reopens them. Both the driver log and the chart's install notes warn about
-  this mode.
+  `mergerfs.daemonLifetime=in-container`): daemons die with the driver pod and are
+  remounted as below. Both the driver log and the chart's install notes warn about this
+  mode.
+
+Each mergerfs daemon's target and exact argv are recorded in
+`<kubeletRoot>/plugins/<driverName>/state/<volumeID>.json` before it starts. On startup
+and every 30s after, the driver remounts every mount whose daemon died, and drops
+records of targets kubelet has removed. The mount comes back at the same path, but file
+descriptors opened before it died keep returning `ENOTCONN` until the workload reopens
+them.
 
 With `mergerfs.daemonLifetime=systemd`, the driver pod does not start at all on nodes
 without systemd, instead of silently falling back.

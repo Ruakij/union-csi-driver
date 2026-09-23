@@ -12,15 +12,13 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// reconcile repairs mounts whose daemon died with the driver pod. It is a no-op
-// where host systemd took ownership of the daemons, since those outlive the
-// driver and there is nothing to repair.
+// reconcile repairs mounts whose daemon died: with the driver pod where there is
+// no host systemd, or by crashing or being OOM-killed anywhere.
 func reconcile(ctx context.Context, stateDir string) {
-	if systemdAvailable() {
-		return
+	if !systemdAvailable() {
+		klog.Warningf("mergerfs: running without host systemd; mergerfs daemons die with this pod and are remounted every %s. "+
+			"Consumers holding open file descriptors across a restart keep seeing ENOTCONN until they reopen the file", reconcileInterval)
 	}
-	klog.Warningf("mergerfs: running without host systemd; mergerfs daemons die with this pod and are remounted every %s. "+
-		"Consumers holding open file descriptors across a restart keep seeing ENOTCONN until they reopen the file", reconcileInterval)
 
 	tick := time.NewTicker(reconcileInterval)
 	defer tick.Stop()
@@ -81,6 +79,9 @@ func reconcileVolume(ctx context.Context, stateDir string, st volumeState) {
 	if err := fuseUnmount(st.Target); err != nil {
 		klog.Errorf("mergerfs: reconcile: %v", err)
 		return
+	}
+	if systemdAvailable() {
+		stopScope(ctx, scopeUnitName(st.VolumeID))
 	}
 	if err := startDaemon(ctx, st.VolumeID, st.Target, st.Argv); err != nil {
 		klog.Errorf("mergerfs: reconcile: remount %s: %v", st.Target, err)

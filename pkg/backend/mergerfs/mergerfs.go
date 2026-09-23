@@ -92,8 +92,7 @@ func (b *mergerfsBackend) Init(stateDir string) error {
 	return nil
 }
 
-// Run keeps mounts alive on nodes where the daemon could not be handed to host
-// systemd. It returns immediately everywhere else.
+// Run remounts volumes whose daemon died, until ctx is done.
 func (b *mergerfsBackend) Run(ctx context.Context) {
 	reconcile(ctx, b.stateDir)
 }
