@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -64,9 +65,11 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 
 	names := make([]string, len(attrs.SourceVolumes))
+	branches := make([]string, len(attrs.SourceVolumes))
 	modeByName := make(map[string]string, len(attrs.SourceVolumes))
 	for i, sv := range attrs.SourceVolumes {
 		names[i] = sv.Name
+		branches[i] = sv.Name + "=" + sv.Mode
 		modeByName[sv.Name] = sv.Mode
 	}
 
@@ -108,6 +111,8 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	if err := d.config.Backend.Mount(ctx, spec); err != nil {
 		return nil, status.Errorf(codes.Internal, "mount: %v", err)
 	}
+	klog.Infof("mounted %s for pod %s/%s from %s at %s", req.GetVolumeId(), attrs.PodNamespace, attrs.PodName,
+		strings.Join(branches, ":"), req.GetTargetPath())
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }
@@ -122,6 +127,9 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 		return nil, status.Error(codes.InvalidArgument, "target path missing in request")
 	}
 
+	// Kubelet repeats unpublishes for targets that are already gone.
+	mounted, err := d.isMounted(req.GetTargetPath())
+	mounted = mounted || err != nil
 	if err := d.config.Backend.Unmount(ctx, req.GetVolumeId(), req.GetTargetPath()); err != nil {
 		return nil, status.Errorf(codes.Internal, "unmount: %v", err)
 	}
@@ -129,6 +137,9 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 	// merge into the source volumes. Failing lets kubelet retry the unpublish.
 	if err := os.Remove(req.GetTargetPath()); err != nil && !os.IsNotExist(err) {
 		return nil, status.Errorf(codes.Internal, "remove target path: %v", err)
+	}
+	if mounted {
+		klog.Infof("unmounted %s at %s", req.GetVolumeId(), req.GetTargetPath())
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
