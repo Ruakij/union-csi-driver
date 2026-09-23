@@ -1,3 +1,38 @@
 apiVersion: v1
-entries: {}
-generated: "1970-01-01T00:00:00Z"
+entries:
+  union-csi-driver:
+  - annotations:
+      artifacthub.io/category: storage
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/operator: "false"
+      artifacthub.io/prerelease: "false"
+    apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-09-23T13:03:25.232496527Z"
+    description: overlayfs and mergerfs CSI driver - unions a pod's sibling volumes
+      into one merged mount
+    digest: 692137ec9675f2ef5d11a75a408dfac9ebb8992c53df9de22871aa7a82783a6b
+    home: https://github.com/Ruakij/union-csi-driver
+    keywords:
+    - csi
+    - storage
+    - overlayfs
+    - overlay
+    - mergerfs
+    - fuse
+    - union
+    - unionfs
+    - merge
+    - ephemeral
+    kubeVersion: '>=1.25.0-0'
+    maintainers:
+    - name: Ruakij
+      url: https://github.com/Ruakij
+    name: union-csi-driver
+    sources:
+    - https://github.com/Ruakij/union-csi-driver
+    type: application
+    urls:
+    - https://github.com/Ruakij/union-csi-driver/releases/download/v0.1.0/union-csi-driver-0.1.0.tgz
+    version: 0.1.0
+generated: "2026-09-23T13:03:25.231801666Z"
