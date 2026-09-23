@@ -56,3 +56,21 @@ func TestLoadStatesIgnoresNonState(t *testing.T) {
 		t.Fatalf("loadStates = %v, %v; want empty, nil", states, err)
 	}
 }
+
+// One unreadable state must not keep the others from being repaired.
+func TestLoadStatesSkipsCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	want := volumeState{VolumeID: "csi-good", Target: "/target", Argv: []string{"-f"}}
+	if err := saveState(dir, want); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{"empty.json": "", "junk.json": "{"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	states, err := loadStates(dir)
+	if err != nil || len(states) != 1 || !reflect.DeepEqual(states[0], want) {
+		t.Fatalf("loadStates = %+v, %v; want [%+v], nil", states, err, want)
+	}
+}

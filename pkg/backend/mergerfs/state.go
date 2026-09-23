@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Ruakij/fuse-sandbox/pkg/sandbox"
+	"k8s.io/klog/v2"
 )
 
 // volumeState is what a restarted driver needs to rebuild a mount it no longer
@@ -35,16 +36,32 @@ func saveState(dir string, st volumeState) error {
 		return fmt.Errorf("mergerfs: marshal state: %w", err)
 	}
 
-	// Rename so a reconcile pass never reads a half-written file.
+	// Synced and renamed, so neither a reconcile pass nor a crash leaves a
+	// half-written file.
 	final := statePath(dir, st.VolumeID)
 	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := writeSynced(tmp, data); err != nil {
 		return fmt.Errorf("mergerfs: write state: %w", err)
 	}
 	if err := os.Rename(tmp, final); err != nil {
 		return fmt.Errorf("mergerfs: write state: %w", err)
 	}
 	return nil
+}
+
+func writeSynced(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 func removeState(dir, volumeID string) error {
@@ -68,13 +85,16 @@ func loadStates(dir string) ([]volumeState, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
+		// One bad file must not keep every other volume from being repaired.
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("mergerfs: read state %s: %w", e.Name(), err)
+			klog.Errorf("mergerfs: skipping state %s: %v", e.Name(), err)
+			continue
 		}
 		var st volumeState
 		if err := json.Unmarshal(data, &st); err != nil {
-			return nil, fmt.Errorf("mergerfs: parse state %s: %w", e.Name(), err)
+			klog.Errorf("mergerfs: skipping state %s: %v", e.Name(), err)
+			continue
 		}
 		states = append(states, st)
 	}
