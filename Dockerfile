@@ -16,7 +16,7 @@
 # emulated toolchain.
 FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETARCH
-ARG version=""
+ARG version=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

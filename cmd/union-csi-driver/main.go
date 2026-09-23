@@ -27,7 +27,7 @@ import (
 
 var (
 	// Set by the build process
-	version = ""
+	version = "dev"
 )
 
 // csvFlag is a flag.Value collecting a comma-separated list into a []string.
