@@ -31,7 +31,7 @@ open file descriptors across a restart keep seeing ENOTCONN until they reopen.
 {{- end }}
 {{- end }}
 
-{{- if and (eq .Values.kubeletRootDir "/var/lib/kubelet") (not .Values.driverName) }}
+{{- if eq .Values.kubeletRootDir "/var/lib/kubelet" }}
 
 kubeletRootDir is the default /var/lib/kubelet. If this is k3s, RKE2 or MicroK8s,
 check the node's real kubelet directory: publishing fails in a way that looks like
