@@ -1,3 +1,5 @@
+github.com/Ruakij/fuse-sandbox v0.0.0-20260923094003-aa88b7c9b96a h1:puP+2sAQkoZC6gVhkr0Q7TFiRhbejNLM8BUMV5dE5DY=
+github.com/Ruakij/fuse-sandbox v0.0.0-20260923094003-aa88b7c9b96a/go.mod h1:kUzD9AVkxSAGz35vK7l5r9QjrYZ0S2iqToKU8w77rMM=
 github.com/container-storage-interface/spec v1.13.0 h1:6ja3nYoACisewTPAAZkJ1pbf4+1ehhvt9Z/nYgWGHGw=
 github.com/container-storage-interface/spec v1.13.0/go.mod h1:fPZ7EFHYJwIwc9CMcoaT/yIhFTdToocYVtyafMG7EDM=
 github.com/coreos/go-systemd/v22 v22.7.0 h1:LAEzFkke61DFROc7zNLX/WA2i5J8gYqe0rSj9KI28KA=

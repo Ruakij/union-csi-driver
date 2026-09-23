@@ -79,6 +79,7 @@ spec:
             - --forced-options={{ . }}
             {{- end }}
             {{- if eq $backend "mergerfs" }}
+            - --mergerfs-sandbox={{ .Values.mergerfs.sandbox }}
             - --mergerfs-seal-control-file={{ .Values.mergerfs.sealControlFile }}
             {{- end }}
             - -v={{ .Values.logLevel }}
@@ -101,8 +102,7 @@ spec:
             - name: plugins-dir
               mountPath: {{ $kubeletRoot }}/plugins
               mountPropagation: Bidirectional
-            {{- /* The mergerfs daemons share this container's mount namespace, so
-            these are also their view of hostPath sources. */}}
+            {{- /* The mergerfs daemons' hostPath branches come from these mounts too. */}}
             {{- range $i, $dir := $hostAllowed }}
             - name: host-path-{{ $i }}
               mountPath: {{ printf "%s%s" $hostMountDir $dir | trimSuffix "/" }}

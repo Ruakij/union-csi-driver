@@ -16,6 +16,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
+	"github.com/Ruakij/fuse-sandbox/pkg/sandbox"
+
 	"github.com/Ruakij/union-csi-driver/internal/proxy"
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 	"github.com/Ruakij/union-csi-driver/pkg/backend/mergerfs"
@@ -82,6 +84,9 @@ func (f kvFlag) Set(value string) error {
 }
 
 func main() {
+	// Returns unless this process is a mergerfs sandbox being set up.
+	sandbox.Init()
+
 	var cfg driver.Config
 	var policyCfg backend.PolicyConfig
 	var backendName string

@@ -149,7 +149,7 @@ func reconcileVolume(ctx context.Context, stateDir string, st volumeState) {
 	if systemdAvailable() {
 		stopScope(ctx, scopeUnitName(st.VolumeID))
 	}
-	if err := startDaemon(ctx, st.VolumeID, st.Target, st.Argv); err != nil {
+	if err := startDaemon(ctx, st); err != nil {
 		klog.Errorf("mergerfs: reconcile: remount %s: %v", st.Target, err)
 	}
 }

@@ -4,6 +4,7 @@ package mergerfs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Ruakij/fuse-sandbox/pkg/sandbox"
 	systemd "github.com/coreos/go-systemd/v22/dbus"
 	godbus "github.com/godbus/dbus/v5"
 	"golang.org/x/sys/unix"
@@ -34,20 +36,33 @@ const (
 	fuseSuperMagic = 0x65735546
 )
 
+// checkSandbox fails the driver's startup on a kernel the sandbox cannot run on,
+// rather than every mount after it.
+func checkSandbox() error {
+	if err := unix.MountSetattr(-1, "", 0, &unix.MountAttr{}); errors.Is(err, unix.ENOSYS) {
+		return errors.New("mergerfs: the sandbox needs Linux 5.12 or newer; disable it with --mergerfs-sandbox=false")
+	}
+	return nil
+}
+
 func mountUnion(ctx context.Context, spec backend.MountSpec, stateDir string) error {
-	argv, err := buildArgv(spec)
-	if err != nil {
+	st := volumeState{VolumeID: spec.VolumeID, Target: spec.Target}
+	if useSandbox {
+		spec, st.Branches = sandboxed(spec)
+	}
+	var err error
+	if st.Argv, err = buildArgv(spec); err != nil {
 		return err
 	}
 
 	// Written before the daemon starts: a crash between the two leaves a state
 	// file for a mount that never came up, which the reconcile loop repairs. The
 	// reverse order would leave a live mount nothing knows how to repair.
-	if err := saveState(stateDir, volumeState{VolumeID: spec.VolumeID, Target: spec.Target, Argv: argv}); err != nil {
+	if err := saveState(stateDir, st); err != nil {
 		return err
 	}
 
-	if err := startDaemon(ctx, spec.VolumeID, spec.Target, argv); err != nil {
+	if err := startDaemon(ctx, st); err != nil {
 		_ = removeState(stateDir, spec.VolumeID)
 		return err
 	}
@@ -55,11 +70,18 @@ func mountUnion(ctx context.Context, spec backend.MountSpec, stateDir string) er
 }
 
 // startDaemon launches mergerfs and returns once the target is a live FUSE mount.
-func startDaemon(ctx context.Context, volumeID, target string, argv []string) error {
-	cmd := exec.Command(mergerfsBinary, argv...)
+func startDaemon(ctx context.Context, st volumeState) error {
+	volumeID, target := st.VolumeID, st.Target
+	cmd, err := daemonCommand(st)
+	if err != nil {
+		return err
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
 	// A new session detaches the daemon from the driver's controlling terminal and
 	// signal group, so a driver shutdown does not take the mount with it.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr.Setsid = true
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
@@ -95,6 +117,30 @@ func startDaemon(ctx context.Context, volumeID, target string, argv []string) er
 		requestReconcile()
 	}()
 	return nil
+}
+
+func daemonCommand(st volumeState) (*exec.Cmd, error) {
+	bin, err := exec.LookPath(mergerfsBinary)
+	if err != nil {
+		return nil, fmt.Errorf("mergerfs: %w", err)
+	}
+	if st.Branches == nil {
+		return exec.Command(bin, st.Argv...), nil
+	}
+	// The sandbox refuses symlinked paths, and binds the binary at its own path.
+	if bin, err = filepath.EvalSymlinks(bin); err != nil {
+		return nil, fmt.Errorf("mergerfs: %w", err)
+	}
+	cmd, err := sandbox.Command(&sandbox.Config{
+		Target:  sandbox.Bind{Host: st.Target, Sandbox: sandboxTarget},
+		Binds:   st.Branches,
+		Devices: []string{"/dev/fuse"},
+		Command: append([]string{bin}, st.Argv...),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mergerfs: %w", err)
+	}
+	return cmd, nil
 }
 
 // sealControlFile bind-mounts the .mergerfs control file read-only over itself.

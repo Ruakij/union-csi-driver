@@ -271,8 +271,8 @@ func (r *Resolver) resolvePVC(ctx context.Context, pod *corev1.Pod, podVolumesRo
 }
 
 // hostPath maps a host-absolute path under the host path mount dir, where the
-// DaemonSet bind-mounts each allowed directory, so the driver container and the
-// mergerfs daemon (which shares its mount namespace) can see it. Kubelet sets up
+// DaemonSet bind-mounts each allowed directory, so the driver container, and
+// through it the mergerfs daemons, can reach it. Kubelet sets up
 // no mount for hostPath, so the directory itself is the source.
 func (r *Resolver) hostPath(name, host string) (SourcePath, error) {
 	host = filepath.Join("/", host)

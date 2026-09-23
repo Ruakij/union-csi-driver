@@ -67,6 +67,9 @@ mergerfs:
   # in-container: never mount /run/systemd; daemons die with the driver pod and
   # are remounted by the reconcile loop.
   daemonLifetime: auto # auto | systemd | in-container
+  # Run each daemon in an empty root holding only its branches and target, so
+  # nothing it is tricked into following leads elsewhere. Needs Linux 5.12+.
+  sandbox: true
   # Bind each union's .mergerfs control file read-only over itself. Without it,
   # root in any consumer container can reconfigure the union through xattrs.
   sealControlFile: true

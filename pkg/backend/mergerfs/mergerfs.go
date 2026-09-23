@@ -22,10 +22,15 @@ var volumeLocks = keymutex.NewHashed(0)
 func lockVolume(id string)   { volumeLocks.LockKey(id) }
 func unlockVolume(id string) { _ = volumeLocks.UnlockKey(id) }
 
-var sealControl = true
+var (
+	useSandbox  = true
+	sealControl = true
+)
 
 // RegisterFlags adds the backend's startup flags to fs.
 func RegisterFlags(fs *flag.FlagSet) {
+	fs.BoolVar(&useSandbox, "mergerfs-sandbox", useSandbox,
+		"run each mergerfs daemon in an empty root holding only its branches and target (Linux 5.12+)")
 	fs.BoolVar(&sealControl, "mergerfs-seal-control-file", sealControl,
 		"bind-mount each union's .mergerfs control file read-only over itself, so consumers cannot reconfigure the union")
 }
@@ -99,6 +104,11 @@ func (b *mergerfsBackend) MaxWritable() int {
 func (b *mergerfsBackend) Init(stateDir string) error {
 	if stateDir == "" {
 		return errors.New("mergerfs: no state directory configured")
+	}
+	if useSandbox {
+		if err := checkSandbox(); err != nil {
+			return err
+		}
 	}
 	b.stateDir = stateDir
 	return nil

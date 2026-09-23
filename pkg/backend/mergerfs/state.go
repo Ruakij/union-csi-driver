@@ -6,15 +6,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Ruakij/fuse-sandbox/pkg/sandbox"
 )
 
 // volumeState is what a restarted driver needs to rebuild a mount it no longer
 // remembers. mountinfo names neither the branch list nor the options, so without
 // this file a dead FUSE mount cannot be repaired, only removed.
 type volumeState struct {
-	VolumeID string   `json:"volumeID"`
-	Target   string   `json:"target"`
-	Argv     []string `json:"argv"`
+	VolumeID string `json:"volumeID"`
+	Target   string `json:"target"`
+	// Argv is the command line as the daemon sees it: inside the sandbox when
+	// Branches is set, on the host otherwise.
+	Argv     []string       `json:"argv"`
+	Branches []sandbox.Bind `json:"branches,omitempty"`
 }
 
 func statePath(dir, volumeID string) string {

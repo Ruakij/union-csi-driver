@@ -11,16 +11,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Ruakij/fuse-sandbox/pkg/sandbox"
 	"golang.org/x/sys/unix"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
+
+func TestMain(m *testing.M) {
+	sandbox.Init()
+	os.Exit(m.Run())
+}
 
 // Runs before any test here mounts, so no earlier scope's exit can pose as the wake.
 func TestWatchScopesWakesOnScopeStop(t *testing.T) {
@@ -86,10 +91,25 @@ func wantContent(t *testing.T, path, want string) {
 	}
 }
 
+// sharedDir returns a temporary directory on its own shared mount, as kubelet's
+// pods directory is, so a sandboxed daemon's mount propagates out of it.
+func sharedDir(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := unix.Mount(root, root, "", unix.MS_BIND, ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unix.Unmount(root, unix.MNT_DETACH) })
+	if err := unix.Mount("", root, "", unix.MS_SHARED, ""); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 // newMount publishes a two-branch merge and returns its target and state dir.
 func newMount(t *testing.T, volumeID string) (target, stateDir, rw, ro string) {
 	t.Helper()
-	root := t.TempDir()
+	root := sharedDir(t)
 	rw = makeSource(t, root, "rw", map[string]string{"rw.txt": "from-rw"})
 	ro = makeSource(t, root, "ro", map[string]string{"ro.txt": "from-ro", "both.txt": "from-ro"})
 	target = filepath.Join(root, "target")
@@ -144,6 +164,66 @@ func TestMountMergesBranches(t *testing.T) {
 	wantContent(t, filepath.Join(target, "late.txt"), "late")
 }
 
+// Symlinks the daemon follows and branches added through the control file resolve
+// inside the sandbox, where the rest of the host does not exist.
+func TestSandboxHidesTheHost(t *testing.T) {
+	root := sharedDir(t)
+	secret := makeSource(t, root, "secret", map[string]string{"key": "secret"})
+	src := makeSource(t, root, "src", nil)
+	if err := os.Symlink(secret, filepath.Join(src, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	be := &mergerfsBackend{}
+	if err := be.Init(filepath.Join(root, "state")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = be.Unmount(context.Background(), "vol-sandbox", target) })
+	defer func(v bool) { sealControl = v }(sealControl)
+	sealControl = false
+
+	// Options the schema refuses, set here to show they reach nothing.
+	spec := backend.MountSpec{
+		VolumeID: "vol-sandbox",
+		Target:   target,
+		Sources:  []backend.Source{{Path: src, Mode: modeRW}},
+		Options:  map[string]string{"follow-symlinks": "all", "cache.entry": "0", "cache.attr": "0"},
+	}
+	if err := be.Mount(context.Background(), spec); err != nil {
+		t.Fatalf("Mount: %v", err)
+	}
+
+	// Unable to follow it, mergerfs returns the link itself, which the reader then
+	// resolves in its own mount namespace.
+	if fi, err := os.Lstat(filepath.Join(target, "escape")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("escape = %v, %v; want the unfollowed symlink", fi, err)
+	}
+	ctl := filepath.Join(target, controlFile)
+	if err := unix.Setxattr(ctl, "user.mergerfs.branches", []byte("+>"+secret), 0); err == nil {
+		if _, err := os.ReadFile(filepath.Join(target, "key")); err == nil {
+			t.Error("read a host file through a branch added at runtime")
+		}
+	}
+}
+
+func TestMountWithoutSandbox(t *testing.T) {
+	defer func(v bool) { useSandbox = v }(useSandbox)
+	useSandbox = false
+	target, stateDir, _, _ := newMount(t, "vol-nosandbox")
+
+	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
+	states, err := loadStates(stateDir)
+	if err != nil || len(states) != 1 || states[0].Branches != nil {
+		t.Fatalf("loadStates = %+v, %v; want one unsandboxed entry", states, err)
+	}
+	killDaemon(t, target)
+	reconcileOnce(context.Background(), stateDir)
+	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
+}
+
 func TestMountSealsControlFile(t *testing.T) {
 	target, _, _, _ := newMount(t, "vol-seal")
 	ctl := filepath.Join(target, controlFile)
@@ -185,6 +265,10 @@ func TestMountWritesState(t *testing.T) {
 // the way a daemon dying with its cgroup does.
 func killDaemon(t *testing.T, target string) {
 	t.Helper()
+	var want unix.Stat_t
+	if err := unix.Stat(target, &want); err != nil {
+		t.Fatal(err)
+	}
 	cmdlines, _ := filepath.Glob("/proc/[0-9]*/cmdline")
 	var killed []int
 	for _, f := range cmdlines {
@@ -192,11 +276,18 @@ func killDaemon(t *testing.T, target string) {
 		if err != nil {
 			continue
 		}
-		args := strings.Split(string(b), "\x00")
-		if filepath.Base(args[0]) != mergerfsBinary || !slices.Contains(args, target) {
+		args := strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00")
+		if filepath.Base(args[0]) != mergerfsBinary {
 			continue
 		}
-		pid, _ := strconv.Atoi(filepath.Base(filepath.Dir(f)))
+		// The mountpoint is the last argument, as the daemon sees it: inside its
+		// sandbox or not, /proc/<pid>/root leads there.
+		var st unix.Stat_t
+		proc := filepath.Dir(f)
+		if unix.Stat(filepath.Join(proc, "root", args[len(args)-1]), &st) != nil || st.Dev != want.Dev {
+			continue
+		}
+		pid, _ := strconv.Atoi(filepath.Base(proc))
 		if err := unix.Kill(pid, unix.SIGKILL); err != nil {
 			t.Fatalf("kill %d: %v", pid, err)
 		}

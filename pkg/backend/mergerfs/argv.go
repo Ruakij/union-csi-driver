@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Ruakij/fuse-sandbox/pkg/sandbox"
+
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
 
@@ -12,6 +14,10 @@ const (
 	modeRW = "RW"
 	modeRO = "RO"
 	modeNC = "NC"
+
+	// Where the sandboxed daemon sees the target and the branches.
+	sandboxTarget    = "/union"
+	sandboxBranchDir = "/branch"
 )
 
 // buildArgv renders the mergerfs command line:
@@ -31,6 +37,22 @@ func buildArgv(spec backend.MountSpec) ([]string, error) {
 	// which is what gets moved into a systemd scope.
 	argv := []string{"-f", "-o", buildOptions(spec)}
 	return append(argv, branches, spec.Target), nil
+}
+
+// sandboxed moves spec's target and sources to their paths inside the sandbox
+// and returns the binds that put them there. RO branches are bound read-only, so
+// no reconfiguration of the daemon can make them writable.
+func sandboxed(spec backend.MountSpec) (backend.MountSpec, []sandbox.Bind) {
+	sources := make([]backend.Source, len(spec.Sources))
+	binds := make([]sandbox.Bind, len(spec.Sources))
+	for i, s := range spec.Sources {
+		dst := fmt.Sprintf("%s/%d", sandboxBranchDir, i)
+		sources[i] = backend.Source{Path: dst, Mode: s.Mode}
+		binds[i] = sandbox.Bind{Host: s.Path, Sandbox: dst, ReadOnly: spec.ReadOnly || s.Mode == modeRO}
+	}
+	spec.Sources = sources
+	spec.Target = sandboxTarget
+	return spec, binds
 }
 
 func buildBranches(sources []backend.Source) (string, error) {

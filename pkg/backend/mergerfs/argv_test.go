@@ -1,8 +1,11 @@
 package mergerfs
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Ruakij/fuse-sandbox/pkg/sandbox"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
@@ -69,5 +72,41 @@ func TestBuildBranchesRejects(t *testing.T) {
 				t.Fatalf("buildBranches() = %q, want error", got)
 			}
 		})
+	}
+}
+
+func TestSandboxed(t *testing.T) {
+	spec := backend.MountSpec{
+		Target: "/var/lib/kubelet/pods/uid/volumes/kubernetes.io~csi/merged/mount",
+		Sources: []backend.Source{
+			{Path: "/vol/a", Mode: modeRW},
+			{Path: "/vol/b", Mode: modeRO},
+			{Path: "/vol/c", Mode: modeNC},
+		},
+	}
+
+	got, binds := sandboxed(spec)
+	if got.Target != sandboxTarget {
+		t.Errorf("target = %q, want %q", got.Target, sandboxTarget)
+	}
+	wantSources := []backend.Source{{Path: "/branch/0", Mode: modeRW}, {Path: "/branch/1", Mode: modeRO}, {Path: "/branch/2", Mode: modeNC}}
+	if !reflect.DeepEqual(got.Sources, wantSources) {
+		t.Errorf("sources = %v, want %v", got.Sources, wantSources)
+	}
+	wantBinds := []sandbox.Bind{
+		{Host: "/vol/a", Sandbox: "/branch/0"},
+		{Host: "/vol/b", Sandbox: "/branch/1", ReadOnly: true},
+		{Host: "/vol/c", Sandbox: "/branch/2"},
+	}
+	if !reflect.DeepEqual(binds, wantBinds) {
+		t.Errorf("binds = %v, want %v", binds, wantBinds)
+	}
+	if spec.Sources[0].Path != "/vol/a" {
+		t.Error("sandboxed modified the caller's sources")
+	}
+
+	spec.ReadOnly = true
+	if _, binds := sandboxed(spec); !binds[0].ReadOnly || !binds[2].ReadOnly {
+		t.Errorf("read-only volume has writable binds: %v", binds)
 	}
 }

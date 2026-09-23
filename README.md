@@ -42,6 +42,10 @@ On top of what overlayfs and mergerfs do themselves:
   whole-volume `readOnly` switch.
 - **Admin-controlled option policy.** Pods may tune backend options, but only within a
   per-backend schema and an admin allowlist, denylist, defaults and forced set.
+- **Sandboxed mergerfs.** Each mergerfs daemon runs in an empty root that holds
+  only its branches and its mount, via
+  [fuse-sandbox](https://github.com/Ruakij/fuse-sandbox). A symlink it follows or a
+  branch added at runtime finds nothing else on the node.
 - **Safe by construction.** Pods never choose the backend and never pass paths or
   process-shaping options. Everything that ends up on a mount command line or in a
   syscall is computed on the node. CI fuzzes the attribute parser and option policy.
@@ -124,12 +128,16 @@ Only CSI ephemeral inline volumes are supported. For each union volume, kubelet 
    - **overlay**: a kernel overlay mount through the `fsopen`/`fsconfig` API where
      available (one argument per layer, no option-length limit), otherwise classic
      `mount(2)`. A single source becomes a bind mount.
-   - **mergerfs**: starts the `mergerfs` daemon without a shell, waits until the
-     target is a live FUSE mount, then bind-mounts its `.mergerfs` control file
-     read-only over itself (`mergerfs.sealControlFile`). mergerfs otherwise lets
-     anyone who can write that file reconfigure the running union through xattrs,
-     adding branches or following symlinks, and root in every consumer container
-     can.
+   - **mergerfs**: starts the `mergerfs` daemon without a shell, in a sandbox
+     (`mergerfs.sandbox`): new mount and PID namespaces whose read-only tmpfs root
+     holds only the branches at `/branch/<n>`, the target at `/union`, `/dev/fuse`,
+     `/dev/null`, the binary and a `/proc` showing only the daemon. `RO` branches,
+     and all of them for a `readOnly` volume, are bound read-only. Only the mount on
+     `/union` propagates out to the target. Once the target is a live FUSE mount,
+     the driver bind-mounts its `.mergerfs` control file read-only over itself
+     (`mergerfs.sealControlFile`). mergerfs otherwise lets anyone who can write that
+     file reconfigure the running union through xattrs, reordering or dropping
+     branches or changing policies, and root in every consumer container can.
 
 A target that is already mounted counts as published, so kubelet's repeated calls,
 including those after a driver restart, are no-ops. `NodeUnpublishVolume` unmounts the
@@ -160,6 +168,9 @@ Or from a checkout, to run an unreleased revision:
 ```sh
 helm install mergerfs-csi charts/union-csi-driver --set backend=mergerfs
 ```
+
+The mergerfs sandbox needs Linux 5.12 or newer, and the driver refuses to start on
+an older kernel unless `mergerfs.sandbox` is `false`.
 
 The driver name defaults to `<backend>.csi.ruekov.eu`, and that is what pods put in
 `volumes[].csi.driver`. If the cluster is k3s, RKE2 or MicroK8s, set `kubeletRootDir`
@@ -251,8 +262,9 @@ backend's own default applies.
 
 Options that widen what mergerfs can reach, such as `follow-symlinks`, `symlinkify`,
 `link-exdev` and `rename-exdev`, are left out of the schema on purpose, so neither pods
-nor admins can set them. mergerfs runs in the driver's mount namespace, where following
-a symlink out of a branch can reach every volume on the node.
+nor admins can set them. In the sandbox, a symlink followed out of a branch reaches only
+the volume's other branches and the daemon's own `/proc`; without it, every volume on
+the node.
 
 #### overlay:
 
@@ -300,6 +312,7 @@ process. These are always computed on the node.
 | `options.defaults`            | `""` (backend default)                                          | `key=value` options applied unless the pod sets them. Empty uses the backend defaults.               |
 | `options.forced`              | `""`                                                            | `key=value` options applied last, overriding the pod.                                                |
 | `mergerfs.daemonLifetime`     | `auto`                                                          | `auto` uses host systemd where present, `systemd` requires it, `in-container` never uses it.         |
+| `mergerfs.sandbox`            | `true`                                                          | Run each mergerfs daemon in a root holding only its branches and target. Needs Linux 5.12+.          |
 | `mergerfs.sealControlFile`    | `true`                                                          | Make each union's `.mergerfs` control file read-only, so consumers cannot reconfigure the union.     |
 | `logLevel`                    | `2`                                                             | klog verbosity of both containers.                                                                   |
 | `rbac.create`                 | `true`                                                          | Create the ClusterRole and binding.                                                                  |

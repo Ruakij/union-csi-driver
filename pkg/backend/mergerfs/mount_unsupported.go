@@ -21,3 +21,5 @@ func unmountUnion(context.Context, string, string, string) error {
 }
 
 func reconcile(context.Context, string) {}
+
+func checkSandbox() error { return nil }
