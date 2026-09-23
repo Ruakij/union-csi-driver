@@ -202,6 +202,21 @@ func testBackend(t *testing.T, b string) {
 		})
 	}
 
+	t.Run("unmounted sources are mounted at admission", func(t *testing.T) {
+		auto := "auto-" + b
+		p := pod(auto, emptyDir("rw"), claim("top"), union("merged", driver, "rw,top=RO", false, ""))
+		c := &p.Spec.Containers[0]
+		c.VolumeMounts = slices.DeleteFunc(c.VolumeMounts, func(m corev1.VolumeMount) bool { return m.Name != "merged" })
+		create(t, p)
+		t.Cleanup(func() { _ = deletePods(context.Background(), auto) })
+		ready(t, auto)
+		expect(t, auto, "cat /merged/shared /.union-csi/sources/top/a", "top\na")
+		// The injected mounts are read-only in the container only; the union still writes.
+		autoUpper := strings.Replace(upper, "/src/rw", "/.union-csi/sources/rw", 1)
+		expect(t, auto, "echo w > /merged/w && cat "+autoUpper+"/w", "w")
+		expectFail(t, auto, "echo x > /.union-csi/sources/rw/x")
+	})
+
 	t.Run("invalid attributes are refused", func(t *testing.T) {
 		badOpt, badName := "bad-opt-"+b, "bad-name-"+b
 		opt := create(t, pod(badOpt, emptyDir("rw"), union("merged", driver, "rw", false, "upperdir=/etc")))

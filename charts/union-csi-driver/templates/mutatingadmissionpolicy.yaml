@@ -1,0 +1,59 @@
+{{- if and .Values.autoMountSources (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") }}
+{{- $driver := include "union-csi-driver.driverName" . | quote -}}
+{{- $name := include "union-csi-driver.fullname" . -}}
+# Kubelet only sets up volumes some container mounts, so a source volume nothing
+# mounts would never appear. Mount each such source read-only into the first
+# container.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: {{ $name }}-mount-sources
+  labels:
+    {{- include "union-csi-driver.labels" . | nindent 4 }}
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [pods]
+  matchConditions:
+    - name: has-union-volume
+      expression: >-
+        has(object.spec.volumes) && object.spec.volumes.exists(v, has(v.csi) && v.csi.driver == {{ $driver }})
+  variables:
+    - name: wanted
+      expression: >-
+        object.spec.volumes
+          .filter(v, has(v.csi) && v.csi.driver == {{ $driver }} && has(v.csi.volumeAttributes) && "sourceVolumes" in v.csi.volumeAttributes)
+          .map(v, v.csi.volumeAttributes["sourceVolumes"].split(",").map(e, e.split("=")[0].trim()))
+          .flatten().distinct()
+    - name: mounted
+      expression: >-
+        object.spec.containers.map(c, has(c.volumeMounts) ? c.volumeMounts.map(m, m.name) : []).flatten() +
+        (has(object.spec.initContainers) ? object.spec.initContainers.map(c, has(c.volumeMounts) ? c.volumeMounts.map(m, m.name) : []).flatten() : [])
+    # Names that are not pod volumes are left to the driver, which reports them.
+    - name: missing
+      expression: >-
+        variables.wanted.filter(n, !(n in variables.mounted) && object.spec.volumes.exists(v, v.name == n))
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          variables.missing.size() == 0 ? [] :
+          has(object.spec.containers[0].volumeMounts)
+            ? variables.missing.map(n, JSONPatch{op: "add", path: "/spec/containers/0/volumeMounts/-",
+                value: Object.spec.containers.volumeMounts{name: n, mountPath: "/.union-csi/sources/" + n, readOnly: true}})
+            : [JSONPatch{op: "add", path: "/spec/containers/0/volumeMounts",
+                value: variables.missing.map(n, Object.spec.containers.volumeMounts{name: n, mountPath: "/.union-csi/sources/" + n, readOnly: true})}]
+  reinvocationPolicy: Never
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}-mount-sources
+  labels:
+    {{- include "union-csi-driver.labels" . | nindent 4 }}
+spec:
+  policyName: {{ $name }}-mount-sources
+{{- end }}

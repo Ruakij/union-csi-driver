@@ -187,8 +187,6 @@ containers:
     image: alpine
     volumeMounts:
       - {name: merged, mountPath: /merged}
-      - {name: data, mountPath: /sources/data}
-      - {name: archive, mountPath: /sources/archive}
 volumes:
   - name: data
     persistentVolumeClaim: {claimName: data}
@@ -201,10 +199,17 @@ volumes:
         sourceVolumes: "data=RW,archive=RO"
 ```
 
-Every source volume needs a `volumeMounts` entry in some container of the pod, even if
-nothing reads it there: kubelet only sets up volumes a container mounts, so an
-unreferenced source never appears on the node. The union volume is rejected with a
-clear error instead of waiting for a source that will never arrive.
+Source volumes may be mounted into containers or left out:
+
+- **Mounted** by any container: used as they are.
+- **Not mounted**: a read-only mount at `/.union-csi/sources/<volume>` is added to the
+  first container at pod creation, since kubelet only sets up volumes some container
+  mounts.
+
+The automatic mount comes from a MutatingAdmissionPolicy the chart installs on clusters
+serving it as `admissionregistration.k8s.io/v1`. `autoMountSources: false` turns it
+off. Without it, every source must be mounted by some container, and a pod where one is
+not fails to mount with an error naming that source.
 
 `sourceVolumes` names volumes of the same pod. Leftmost wins on lookup, and the mode
 suffix says whether writes may land there: `RW`, `RO`, or (mergerfs only) `NC`. A bare
@@ -321,6 +326,7 @@ process. These are always computed on the node.
 | `mergerfs.daemonLifetime`     | `auto`                                                          | `auto` uses host systemd where present, `systemd` requires it, `in-container` never uses it.         |
 | `mergerfs.sandbox`            | `true`                                                          | Run each mergerfs daemon in a root holding only its branches and target. Needs Linux 5.12+.          |
 | `mergerfs.sealControlFile`    | `true`                                                          | Make each union's `.mergerfs` control file read-only, so consumers cannot reconfigure the union.     |
+| `autoMountSources`            | `true`                                                          | Mount unmounted source volumes into the first container at admission (MutatingAdmissionPolicy).      |
 | `logLevel`                    | `2`                                                             | klog verbosity of both containers.                                                                   |
 | `rbac.create`                 | `true`                                                          | Create the ClusterRole and binding.                                                                  |
 | `serviceAccount.create`       | `true`                                                          | Create the ServiceAccount.                                                                           |

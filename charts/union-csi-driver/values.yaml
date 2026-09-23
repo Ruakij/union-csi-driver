@@ -86,6 +86,13 @@ mergerfs:
   # root in any consumer container can reconfigure the union through xattrs.
   sealControlFile: true
 
+# Mount every source volume no container mounts read-only into the pod's first
+# container, under /.union-csi/sources/<volume>, so kubelet sets it up. Applied at pod
+# admission by a MutatingAdmissionPolicy, so only on clusters serving
+# admissionregistration.k8s.io/v1 MutatingAdmissionPolicy; elsewhere such pods fail
+# to mount with an error naming the unmounted source.
+autoMountSources: true
+
 logLevel: 2
 
 rbac:

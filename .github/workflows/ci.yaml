@@ -135,6 +135,7 @@ jobs:
         run: |
           helm template ci charts/union-csi-driver --set backend=mergerfs > /dev/null
           helm template ci charts/union-csi-driver --set backend=overlay > /dev/null
+          helm template ci charts/union-csi-driver --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy > /dev/null
       - uses: helm/chart-testing-action@v2
       # The released chart version comes from the git tag, not Chart.yaml, so
       # demanding a version bump per chart change would be asking for a no-op edit.
