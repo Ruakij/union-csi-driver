@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -288,5 +289,34 @@ func TestMountRefusesSymlinkedWorkspace(t *testing.T) {
 				t.Errorf("symlink target got %d entries, want none", len(entries))
 			}
 		})
+	}
+}
+
+func TestMountRefusesUnsupportedUpperFS(t *testing.T) {
+	root := t.TempDir()
+	var st unix.Statfs_t
+	if err := unix.Statfs(root, &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Type != unix.OVERLAYFS_SUPER_MAGIC {
+		t.Skipf("%s is not on overlayfs", root)
+	}
+	rw := makeSource(t, root, "rw", nil)
+	ro := makeSource(t, newWorkspace(t), "ro", map[string]string{"lower.txt": "from-lower"})
+	target := makeTarget(t, newWorkspace(t))
+
+	be := newBackend(t)
+	spec := backend.MountSpec{
+		VolumeID: "vol-upperfs",
+		Target:   target,
+		Sources:  []backend.Source{{Path: rw, Mode: modeRW}, {Path: ro, Mode: modeRO}},
+		Options:  be.DefaultOptions(),
+	}
+	err := be.Mount(context.Background(), spec)
+	if err == nil || !strings.Contains(err.Error(), "is on overlay") {
+		t.Fatalf("Mount error = %v, want one naming the upper filesystem", err)
+	}
+	if _, err := os.Stat(filepath.Join(rw, workspaceDir)); !os.IsNotExist(err) {
+		t.Errorf("workspace was created on the refused filesystem: %v", err)
 	}
 }

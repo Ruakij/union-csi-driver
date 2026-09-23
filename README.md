@@ -194,8 +194,9 @@ read-only regardless.
   must be listed first, since the kernel always stacks the single upperdir on top. A
   bare name means `RW`, so mark every other entry `=RO`. The RW entry's merged content
   lives in `<volume>/.union-csi/upper`, so data already at the root of the RW volume is
-  not part of the merge. Editing a lower layer while mounted is undefined behaviour per
-  the kernel docs.
+  not part of the merge. The RW volume must be on a local filesystem: NFS, CephFS,
+  SMB, FUSE and overlay are refused as a writable layer. Editing a lower layer while
+  mounted is undefined behaviour per the kernel docs.
 
 ## Configuration
 

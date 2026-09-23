@@ -59,6 +59,9 @@ func openWorkspace(root string) (*workspace, error) {
 		return nil, fmt.Errorf("overlay: open %s: %w", root, err)
 	}
 	defer func() { _ = unix.Close(rootFD) }()
+	if err := checkUpperFS(rootFD, root); err != nil {
+		return nil, err
+	}
 
 	wsFD, err := openDirNoFollow(rootFD, root, workspaceDir)
 	if err != nil {
@@ -78,6 +81,30 @@ func openWorkspace(root string) (*workspace, error) {
 	ws.upper = fmt.Sprintf("/proc/self/fd/%d", ws.fds[0])
 	ws.work = fmt.Sprintf("/proc/self/fd/%d", ws.fds[1])
 	return ws, nil
+}
+
+// unsupportedUpperFS are filesystems the kernel refuses as upperdir with a bare
+// EINVAL: network and FUSE filesystems revalidate dentries, and overlay cannot
+// nest its own upper.
+var unsupportedUpperFS = map[uint32]string{
+	unix.NFS_SUPER_MAGIC:       "NFS",
+	unix.FUSE_SUPER_MAGIC:      "FUSE",
+	unix.CEPH_SUPER_MAGIC:      "CephFS",
+	unix.CIFS_SUPER_MAGIC:      "CIFS",
+	unix.SMB_SUPER_MAGIC:       "SMB",
+	unix.SMB2_SUPER_MAGIC:      "SMB",
+	unix.OVERLAYFS_SUPER_MAGIC: "overlay",
+}
+
+func checkUpperFS(fd int, path string) error {
+	var st unix.Statfs_t
+	if err := unix.Fstatfs(fd, &st); err != nil {
+		return fmt.Errorf("overlay: statfs %s: %w", path, err)
+	}
+	if name, bad := unsupportedUpperFS[uint32(st.Type)]; bad {
+		return fmt.Errorf("overlay: the RW source %s is on %s, which the kernel does not support as a writable layer; use a local filesystem volume, or the mergerfs backend", path, name)
+	}
+	return nil
 }
 
 func (ws *workspace) close() {
