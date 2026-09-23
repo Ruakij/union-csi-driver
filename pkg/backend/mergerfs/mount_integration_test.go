@@ -253,6 +253,34 @@ func TestSandboxKeepsInheritedFilesOut(t *testing.T) {
 	}
 }
 
+// The daemon answers the lookup of the control file, from branches a pod writes,
+// so what it answers must not decide what gets sealed.
+func TestSealIgnoresPlantedControlFile(t *testing.T) {
+	for name, plant := range map[string]func(path, decoy string) error{
+		"symlink":   func(path, decoy string) error { return os.Symlink(decoy, path) },
+		"directory": func(path, _ string) error { return os.Mkdir(path, 0o755) },
+		"file":      func(path, _ string) error { return os.WriteFile(path, nil, 0o644) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := sharedDir(t)
+			decoy := makeSource(t, root, "decoy", nil)
+			src := makeSource(t, root, "src", nil)
+			if err := plant(filepath.Join(src, controlFile), decoy); err != nil {
+				t.Fatal(err)
+			}
+			target := mountSources(t, root, "vol-plant-"+name, nil, src)
+
+			if sealed(decoy) {
+				t.Error("sealed the planted link's destination")
+			}
+			ctl := filepath.Join(target, controlFile)
+			if err := unix.Setxattr(ctl, "user.mergerfs.follow-symlinks", []byte("all"), 0); !errors.Is(err, unix.EROFS) {
+				t.Errorf("setxattr on %s = %v, want EROFS", ctl, err)
+			}
+		})
+	}
+}
+
 // mountSources publishes a merge of RW sources under root and returns its target.
 func mountSources(t *testing.T, root, volumeID string, options map[string]string, sources ...string) string {
 	t.Helper()
