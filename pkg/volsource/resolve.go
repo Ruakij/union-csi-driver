@@ -172,20 +172,7 @@ func (r *Resolver) resolveOne(ctx context.Context, pod *corev1.Pod, podVolumesRo
 		return SourcePath{Name: vol.Name, Path: filepath.Join(podVolumesRoot, "kubernetes.io~projected", vol.Name), Root: podVolumesRoot}, nil
 
 	case vol.HostPath != nil:
-		// hostPath paths are host-absolute; the DaemonSet bind-mounts the host
-		// root at hostRoot, so map the path under it to make it visible to the
-		// driver container (and to the mergerfs daemon, which shares its mount
-		// namespace). Relative hostPath paths are a kubelet edge case; normalize
-		// against the host root first.
-		host := vol.HostPath.Path
-		if !filepath.IsAbs(host) {
-			host = filepath.Join("/", host)
-		}
-		return SourcePath{
-			Name: vol.Name,
-			Path: filepath.Join(r.hostRoot, host),
-			Root: r.hostRoot,
-		}, nil
+		return r.hostPath(vol.Name, vol.HostPath.Path), nil
 
 	case vol.NFS != nil:
 		return SourcePath{
@@ -251,16 +238,47 @@ func (r *Resolver) resolvePVC(ctx context.Context, pod *corev1.Pod, podVolumesRo
 		}
 		return SourcePath{}, fmt.Errorf("get PV %q: %w", pvc.Spec.VolumeName, err)
 	}
-	if pv.Spec.CSI == nil {
-		return SourcePath{}, fmt.Errorf("PV %q is not CSI-backed (in-tree plugins are not supported)", pv.Name)
-	}
 
+	// Kubelet names a PV's pod volume directory after the PV, not the pod volume.
+	var pluginDir string
+	switch {
+	case pv.Spec.CSI != nil:
+		return SourcePath{
+			Name:     vol.Name,
+			Path:     filepath.Join(podVolumesRoot, "kubernetes.io~csi", pv.Name, "mount"),
+			CSIBased: true,
+			Root:     podVolumesRoot,
+		}, nil
+	case pv.Spec.HostPath != nil:
+		return r.hostPath(vol.Name, pv.Spec.HostPath.Path), nil
+	case pv.Spec.Local != nil:
+		pluginDir = "kubernetes.io~local-volume"
+	case pv.Spec.NFS != nil:
+		pluginDir = "kubernetes.io~nfs"
+	case pv.Spec.ISCSI != nil:
+		pluginDir = "kubernetes.io~iscsi"
+	case pv.Spec.FC != nil:
+		pluginDir = "kubernetes.io~fc"
+	default:
+		return SourcePath{}, fmt.Errorf("PV %q uses an unsupported volume plugin", pv.Name)
+	}
 	return SourcePath{
 		Name:     vol.Name,
-		Path:     filepath.Join(podVolumesRoot, "kubernetes.io~csi", pv.Name, "mount"),
+		Path:     filepath.Join(podVolumesRoot, pluginDir, pv.Name),
 		CSIBased: true,
 		Root:     podVolumesRoot,
 	}, nil
+}
+
+// hostPath maps a host-absolute path under hostRoot, where the DaemonSet
+// bind-mounts the node's root, so the driver container and the mergerfs daemon
+// (which shares its mount namespace) can see it. Kubelet sets up no mount for
+// hostPath, so the directory itself is the source.
+func (r *Resolver) hostPath(name, host string) SourcePath {
+	if !filepath.IsAbs(host) {
+		host = filepath.Join("/", host)
+	}
+	return SourcePath{Name: name, Path: filepath.Join(r.hostRoot, host), Root: r.hostRoot}
 }
 
 // assertContained ensures resolved is lexically under root. Every input is

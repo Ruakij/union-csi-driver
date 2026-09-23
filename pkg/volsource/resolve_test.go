@@ -164,7 +164,7 @@ func TestResolveUnboundPVCIsRetryable(t *testing.T) {
 	}
 }
 
-func TestResolveNonCSIPVRejected(t *testing.T) {
+func TestResolveInTreePV(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: testPod, Namespace: testNamespace, UID: types.UID(testUID)},
 		Spec: corev1.PodSpec{
@@ -179,23 +179,61 @@ func TestResolveNonCSIPVRejected(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "base", Namespace: testNamespace},
 		Spec:       corev1.PersistentVolumeClaimSpec{VolumeName: "pv-intree"},
 	}
-	pv := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{Name: "pv-intree"},
-		Spec: corev1.PersistentVolumeSpec{PersistentVolumeSource: corev1.PersistentVolumeSource{
-			NFS: &corev1.NFSVolumeSource{Server: "nfs.example.com", Path: "/export"},
-		}},
-	}
-	client := fake.NewSimpleClientset(mountAll(pod), pvc, pv)
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
-	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
-	if err == nil {
-		t.Fatal("Resolve() = nil, want error for non-CSI PV")
+	for _, tc := range []struct {
+		name     string
+		source   corev1.PersistentVolumeSource
+		wantPath string
+		wantCSI  bool
+	}{
+		{"local", corev1.PersistentVolumeSource{Local: &corev1.LocalVolumeSource{Path: "/mnt/disk"}},
+			filepath.Join(podVolumesRoot(), "kubernetes.io~local-volume", "pv-intree"), true},
+		{"nfs", corev1.PersistentVolumeSource{NFS: &corev1.NFSVolumeSource{Server: "nfs.example.com", Path: "/export"}},
+			filepath.Join(podVolumesRoot(), "kubernetes.io~nfs", "pv-intree"), true},
+		{"iscsi", corev1.PersistentVolumeSource{ISCSI: &corev1.ISCSIPersistentVolumeSource{TargetPortal: "10.0.0.1:3260", IQN: "iqn.2001-04.com.example:storage", Lun: 0}},
+			filepath.Join(podVolumesRoot(), "kubernetes.io~iscsi", "pv-intree"), true},
+		{"fc", corev1.PersistentVolumeSource{FC: &corev1.FCVolumeSource{WWIDs: []string{"3600508b400105e210000900000490000"}}},
+			filepath.Join(podVolumesRoot(), "kubernetes.io~fc", "pv-intree"), true},
+		{"hostPath", corev1.PersistentVolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/srv/data"}},
+			filepath.Join(testHostRoot, "srv", "data"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pv := &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "pv-intree"},
+				Spec:       corev1.PersistentVolumeSpec{PersistentVolumeSource: tc.source},
+			}
+			client := fake.NewSimpleClientset(mountAll(pod), pvc, pv)
+			r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+			got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
+			if err != nil {
+				t.Fatalf("Resolve() unexpected error: %v", err)
+			}
+			if len(got) != 1 || got[0].Path != tc.wantPath || got[0].CSIBased != tc.wantCSI {
+				t.Fatalf("Resolve() = %+v, want path %q CSIBased=%v", got, tc.wantPath, tc.wantCSI)
+			}
+		})
 	}
-	var notReady *NotReadyError
-	if errors.As(err, &notReady) {
-		t.Fatal("Resolve() returned *NotReadyError for a non-CSI PV, want a non-retryable error")
-	}
+
+	t.Run("unsupported", func(t *testing.T) {
+		pv := &corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "pv-intree"},
+			Spec: corev1.PersistentVolumeSpec{PersistentVolumeSource: corev1.PersistentVolumeSource{
+				FlexVolume: &corev1.FlexPersistentVolumeSource{Driver: "example/flex"},
+			}},
+		}
+		client := fake.NewSimpleClientset(mountAll(pod), pvc, pv)
+		r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+		_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
+		if err == nil {
+			t.Fatal("Resolve() = nil, want error for an unsupported PV type")
+		}
+		var notReady *NotReadyError
+		if errors.As(err, &notReady) {
+			t.Fatal("Resolve() returned *NotReadyError, want a non-retryable error")
+		}
+	})
 }
 
 func TestResolveMissingVolumeName(t *testing.T) {
