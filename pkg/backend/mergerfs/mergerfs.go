@@ -50,9 +50,10 @@ func (b *mergerfsBackend) Name() string { return "mergerfs" }
 // argument and every option that shapes it or the process (branches,
 // moveonenospc, allow_other) is structurally absent: those are driver-computed.
 // cache.files=per-process is absent too: it looks callers up by pid, which the
-// sandbox's PID namespace hides.
+// sandbox's PID namespace hides. follow-symlinks needs the sandbox, where a
+// followed symlink reaches nothing but the volume's own branches.
 func (b *mergerfsBackend) Schema() backend.OptionSchema {
-	return backend.OptionSchema{
+	s := backend.OptionSchema{
 		"cache.entry":          {Kind: backend.ValueDuration},
 		"cache.attr":           {Kind: backend.ValueDuration},
 		"cache.negative_entry": {Kind: backend.ValueDuration},
@@ -69,6 +70,10 @@ func (b *mergerfsBackend) Schema() backend.OptionSchema {
 		"threads":          {Kind: backend.ValueInt, MinInt: -16, MaxInt: 1024},
 		"minfreespace":     {Kind: backend.ValueSize},
 	}
+	if useSandbox {
+		s["follow-symlinks"] = backend.OptionSpec{Kind: backend.ValueEnum, Enum: []string{"never", "directory", "regular", "all"}}
+	}
+	return s
 }
 
 // DefaultOptions keeps lookups cheap while still reflecting live edits to the

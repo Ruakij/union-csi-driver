@@ -262,12 +262,13 @@ backend's own default applies.
 | `inodecalc`            | `passthrough`, `path-hash`, `devino-hash`, `hybrid-hash`, and their `32` variants | -        | How inode numbers of merged files are computed.                                      |
 | `threads`              | -16 to 1024                                                                       | -        | Worker threads: 0 for one per CPU, negative to divide the CPU count.                 |
 | `minfreespace`         | size, e.g. `4G`                                                                   | -        | Minimum free space for a branch to receive new files.                                |
+| `follow-symlinks`      | `never`, `directory`, `regular`, `all`                                            | -        | Serve what symlinks point at instead of the links. Only with `mergerfs.sandbox`.     |
 
-Options that widen what mergerfs can reach, such as `follow-symlinks`, `symlinkify`,
-`link-exdev` and `rename-exdev`, are left out of the schema on purpose, so neither pods
-nor admins can set them. In the sandbox, a symlink followed out of a branch reaches only
-the volume's other branches and the daemon's own `/proc`; without it, every volume on
-the node.
+`follow-symlinks` resolves links inside the sandbox, so it reaches only the volume's own
+branches; links pointing anywhere else are served as links. Without the sandbox it would
+reach the whole node, so the option is refused there. `symlinkify`, `link-exdev` and
+`rename-exdev` are left out: the links they create point at branch paths only the daemon
+sees.
 
 #### overlay:
 
