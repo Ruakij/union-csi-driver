@@ -113,8 +113,10 @@ Only CSI ephemeral inline volumes are supported. For each union volume, kubelet 
    `<kubeletRoot>/pods/<podUID>/volumes/`. PVCs are followed to their PV name, since
    kubelet names their directories that way. Generic ephemeral volumes are followed
    through their `<pod>-<volume>` claim, which must be owned by the pod. hostPath
-   volumes and PVs are looked up under the host root bind-mounted at `/host`. Every
-   resolved path must stay inside its root.
+   volumes and PVs must lie in one of the `hostPaths.allowed` directories and outside
+   `hostPaths.denied`, checked again after resolving symlinks; they are looked up
+   where the chart mounts those directories, under `/host`. Every resolved path must
+   stay inside its root.
 4. Waits up to `publishTimeout` for each source: a real mountpoint for CSI, `local` and
    network volumes, an existing directory for the rest. On timeout it returns a
    retryable error and kubelet tries again later.
@@ -275,8 +277,9 @@ process. These are always computed on the node.
 | `image.pullPolicy`            | `IfNotPresent`                                                  | Driver image pull policy.                                                                            |
 | `registrar.image.*`           | `registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0` | `node-driver-registrar` image, same fields as `image`.                                               |
 | `kubeletRootDir`              | `/var/lib/kubelet`                                              | The node's kubelet directory. MicroK8s uses `/var/snap/microk8s/common/var/lib/kubelet`.             |
-| `hostRootMount`               | `true`                                                          | Bind-mount the host root into the driver container. Required for `hostPath` sources.                 |
-| `hostRootDir`                 | `/host`                                                         | Where the host root is mounted inside the driver container.                                          |
+| `hostPaths.allowed`           | `[]`                                                            | Host directories hostPath sources may come from; empty disables them, `[/]` allows the whole host.   |
+| `hostPaths.denied`            | system and runtime directories                                  | Host directories refused below the allowed ones. `kubeletRootDir` is always added.                   |
+| `hostPaths.mountDir`          | `/host`                                                         | Where the allowed directories are mounted inside the driver container.                               |
 | `publishTimeout`              | `30s`                                                           | How long a mount waits for its source volumes before failing and letting kubelet retry.              |
 | `maxSourceVolumes`            | `32`                                                            | Maximum `sourceVolumes` entries per union volume.                                                    |
 | `options.allowlist`           | `""`                                                            | Backend options pods may set. Empty allows every schema option that is not denied.                   |

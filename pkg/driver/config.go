@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
+	"github.com/Ruakij/union-csi-driver/pkg/volsource"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -14,11 +15,8 @@ type Config struct {
 	NodeID        string
 	Endpoint      string
 
-	KubeletRoot string
-	// HostRoot is where the node's root filesystem is bind-mounted inside the
-	// driver container (--host-root). hostPath source volumes are mapped under
-	// it; empty disables hostPath sources.
-	HostRoot         string
+	KubeletRoot      string
+	HostPaths        volsource.HostPaths
 	StateDir         string
 	PublishTimeout   time.Duration
 	MaxSourceVolumes int

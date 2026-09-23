@@ -1,6 +1,9 @@
 {{- $kubeletRoot := trimSuffix "/" .Values.kubeletRootDir -}}
 {{- $backend := include "union-csi-driver.backend" . -}}
 {{- $systemd := include "union-csi-driver.wantsSystemd" . -}}
+{{- $hostMountDir := trimSuffix "/" .Values.hostPaths.mountDir -}}
+{{- $hostAllowed := uniq .Values.hostPaths.allowed -}}
+{{- $hostDenied := uniq (append .Values.hostPaths.denied $kubeletRoot) -}}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -57,9 +60,9 @@ spec:
             - --endpoint=unix:///csi/csi.sock
             - --nodeid=$(KUBE_NODE_NAME)
             - --kubelet-root={{ $kubeletRoot }}
-            {{- if .Values.hostRootMount }}
-            - --host-root={{ .Values.hostRootDir }}
-            {{- end }}
+            - --host-root={{ $hostMountDir }}
+            - --host-path-allow={{ join "," $hostAllowed }}
+            - --host-path-deny={{ join "," $hostDenied }}
             - --publish-timeout={{ .Values.publishTimeout }}
             - --max-source-volumes={{ .Values.maxSourceVolumes }}
             - --denylist-mode={{ .Values.options.denylistMode }}
@@ -95,13 +98,12 @@ spec:
             - name: plugins-dir
               mountPath: {{ $kubeletRoot }}/plugins
               mountPropagation: Bidirectional
-            {{- if .Values.hostRootMount }}
-            # hostPath sources are resolved against the host root; the mergerfs
-            # daemon shares this container's mount namespace, so it must see the
-            # same host-path view.
-            - name: host-root
-              mountPath: {{ .Values.hostRootDir }}
-              mountPropagation: Bidirectional
+            {{- /* The mergerfs daemons share this container's mount namespace, so
+            these are also their view of hostPath sources. */}}
+            {{- range $i, $dir := $hostAllowed }}
+            - name: host-path-{{ $i }}
+              mountPath: {{ printf "%s%s" $hostMountDir $dir | trimSuffix "/" }}
+              mountPropagation: HostToContainer
             {{- end }}
             {{- if eq $backend "mergerfs" }}
             - name: dev-fuse
@@ -147,14 +149,11 @@ spec:
           hostPath:
             path: {{ $kubeletRoot }}/plugins
             type: Directory
-        {{- if .Values.hostRootMount }}
-        - name: host-root
+        {{- range $i, $dir := $hostAllowed }}
+        - name: host-path-{{ $i }}
           hostPath:
-            # The host root itself. The driver needs write access so the merge
-            # and the hostPath sources' branches are reachable; the container is
-            # already privileged.
-            path: /
-            type: Directory
+            path: {{ $dir }}
+            type: DirectoryOrCreate
         {{- end }}
         - name: registration-dir
           hostPath:

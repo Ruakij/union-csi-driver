@@ -22,13 +22,30 @@ registrar:
 # /var/snap/microk8s/common/var/lib/kubelet.
 kubeletRootDir: /var/lib/kubelet
 
-# Bind-mount the host root filesystem into the driver container. hostPath source
-# volumes are resolved against this mount, which is the only way the driver (and
-# the mergerfs daemon, which shares its mount namespace) can see them. Disable
-# only if you never use hostPath sources and want to shrink the host surface
-# exposed to the privileged container.
-hostRootMount: true
-hostRootDir: /host
+# Host directories hostPath sources (pod volumes and hostPath PVs) may come from.
+# Only these are mounted into the driver container, under mountDir. Empty disables
+# hostPath sources; [/] allows the whole host. denied applies below the allowed
+# directories, also after resolving symlinks; kubeletRootDir is always denied.
+hostPaths:
+  allowed: []
+  denied:
+    - /proc
+    - /sys
+    - /dev
+    - /boot
+    - /etc
+    - /root
+    - /run
+    - /var/run
+    - /var/lib/containerd
+    - /var/lib/docker
+    - /var/lib/etcd
+    - /var/lib/rancher/k3s/agent
+    - /var/lib/rancher/k3s/server
+    - /var/lib/rancher/rke2/agent
+    - /var/lib/rancher/rke2/server
+    - /var/log
+  mountDir: /host
 
 publishTimeout: 30s
 maxSourceVolumes: 32

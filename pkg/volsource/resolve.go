@@ -33,33 +33,32 @@ func notReadyf(format string, args ...interface{}) error {
 // node-local path, and whether it is CSI-backed (must be polled as a real
 // mountpoint) or a plain directory (existence is enough). Root is the
 // containment base the path must sit under (kubelet's pod volumes dir, or the
-// host-root bind mount for hostPath).
+// host path mount dir for hostPath).
 type SourcePath struct {
 	Name     string
 	Path     string
 	CSIBased bool
 	Root     string
+
+	// hostPaths is set for hostPath sources, whose resolved path it re-checks.
+	hostPaths *HostPaths
 }
 
 // Resolver maps pod volume names to paths the driver container can see.
 type Resolver struct {
 	client      kubernetes.Interface
 	kubeletRoot string
-	// hostRoot is where the node's real root filesystem is bind-mounted inside
-	// the driver container (--host-root, default /host). hostPath volume paths
-	// are mapped under it, since the DaemonSet mounts the host root there.
-	hostRoot string
+	hostPaths   HostPaths
 	// ownDriverName is this driver's own CSI driver name, used to refuse
 	// referencing another instance of this driver as a source (cycle guard).
 	ownDriverName string
 }
 
 // NewResolver builds a Resolver. kubeletRoot is the node's kubelet directory
-// (--kubelet-root, default /var/lib/kubelet). hostRoot is where the host root
-// is bind-mounted in the container (--host-root, default /host). ownDriverName
-// is the configured --drivername, used for the cycle guard.
-func NewResolver(client kubernetes.Interface, kubeletRoot, hostRoot, ownDriverName string) *Resolver {
-	return &Resolver{client: client, kubeletRoot: kubeletRoot, hostRoot: hostRoot, ownDriverName: ownDriverName}
+// (--kubelet-root, default /var/lib/kubelet). hostPaths governs hostPath
+// sources. ownDriverName is the configured --drivername, used for the cycle guard.
+func NewResolver(client kubernetes.Interface, kubeletRoot string, hostPaths HostPaths, ownDriverName string) *Resolver {
+	return &Resolver{client: client, kubeletRoot: kubeletRoot, hostPaths: hostPaths, ownDriverName: ownDriverName}
 }
 
 // Resolve maps each requested pod volume name to its kubelet publish path.
@@ -173,7 +172,7 @@ func (r *Resolver) resolveOne(ctx context.Context, pod *corev1.Pod, podVolumesRo
 		return SourcePath{Name: vol.Name, Path: filepath.Join(podVolumesRoot, "kubernetes.io~projected", vol.Name), Root: podVolumesRoot}, nil
 
 	case vol.HostPath != nil:
-		return r.hostPath(vol.Name, vol.HostPath.Path), nil
+		return r.hostPath(vol.Name, vol.HostPath.Path)
 
 	case vol.NFS != nil:
 		return SourcePath{
@@ -251,7 +250,7 @@ func (r *Resolver) resolvePVC(ctx context.Context, pod *corev1.Pod, podVolumesRo
 			Root:     podVolumesRoot,
 		}, nil
 	case pv.Spec.HostPath != nil:
-		return r.hostPath(vol.Name, pv.Spec.HostPath.Path), nil
+		return r.hostPath(vol.Name, pv.Spec.HostPath.Path)
 	case pv.Spec.Local != nil:
 		pluginDir = "kubernetes.io~local-volume"
 	case pv.Spec.NFS != nil:
@@ -271,15 +270,16 @@ func (r *Resolver) resolvePVC(ctx context.Context, pod *corev1.Pod, podVolumesRo
 	}, nil
 }
 
-// hostPath maps a host-absolute path under hostRoot, where the DaemonSet
-// bind-mounts the node's root, so the driver container and the mergerfs daemon
-// (which shares its mount namespace) can see it. Kubelet sets up no mount for
-// hostPath, so the directory itself is the source.
-func (r *Resolver) hostPath(name, host string) SourcePath {
-	if !filepath.IsAbs(host) {
-		host = filepath.Join("/", host)
+// hostPath maps a host-absolute path under the host path mount dir, where the
+// DaemonSet bind-mounts each allowed directory, so the driver container and the
+// mergerfs daemon (which shares its mount namespace) can see it. Kubelet sets up
+// no mount for hostPath, so the directory itself is the source.
+func (r *Resolver) hostPath(name, host string) (SourcePath, error) {
+	host = filepath.Join("/", host)
+	if err := r.hostPaths.check(host); err != nil {
+		return SourcePath{}, err
 	}
-	return SourcePath{Name: name, Path: filepath.Join(r.hostRoot, host), Root: r.hostRoot}
+	return SourcePath{Name: name, Path: filepath.Join(r.hostPaths.Root, host), Root: r.hostPaths.Root, hostPaths: &r.hostPaths}, nil
 }
 
 // assertContained ensures resolved is lexically under root. Every input is
@@ -339,7 +339,17 @@ func (p SourcePath) RealPath() (string, error) {
 		if filepath.IsAbs(target) {
 			cur = "/"
 		}
+		// Refuse early: a directory outside the allowed ones is not mounted here,
+		// and would otherwise look like one that does not exist yet.
+		if dest := filepath.Join(cur, target); p.hostPaths != nil && !p.hostPaths.reachable(dest) {
+			return "", fmt.Errorf("%s links to %s: %w", p.Path, dest, ErrHostPathNotAllowed)
+		}
 		pending = append(strings.Split(target, string(filepath.Separator)), pending...)
+	}
+	if p.hostPaths != nil {
+		if err := p.hostPaths.check(cur); err != nil {
+			return "", err
+		}
 	}
 	return filepath.Join(p.Root, cur), nil
 }

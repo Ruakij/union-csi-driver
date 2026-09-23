@@ -22,6 +22,8 @@ const (
 	testDriverName  = "mergerfs.csi.ruekov.eu"
 )
 
+var testHostPaths = HostPaths{Root: testHostRoot, Allowed: []string{"/"}}
+
 // mountAll gives the pod a container mounting every declared volume, which is
 // what Resolve requires and what kubelet needs to set the volumes up.
 func mountAll(pod *corev1.Pod) *corev1.Pod {
@@ -58,7 +60,7 @@ func TestResolvePVC(t *testing.T) {
 	}
 
 	client := fake.NewSimpleClientset(mountAll(pod), pvc, pv)
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
 	if err != nil {
@@ -82,7 +84,7 @@ func TestResolveInlineCSI(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"scratch"})
 	if err != nil {
@@ -106,7 +108,7 @@ func TestResolveEmptyDir(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"cache"})
 	if err != nil {
@@ -128,7 +130,7 @@ func TestResolveConfigMap(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"cfg"})
 	if err != nil {
@@ -156,7 +158,7 @@ func TestResolveUnboundPVCIsRetryable(t *testing.T) {
 		// VolumeName intentionally empty: unbound.
 	}
 	client := fake.NewSimpleClientset(mountAll(pod), pvc)
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
 	var notReady *NotReadyError
@@ -204,7 +206,7 @@ func TestResolveInTreePV(t *testing.T) {
 				Spec:       corev1.PersistentVolumeSpec{PersistentVolumeSource: tc.source},
 			}
 			client := fake.NewSimpleClientset(mountAll(pod), pvc, pv)
-			r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+			r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 			got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
 			if err != nil {
@@ -224,7 +226,7 @@ func TestResolveInTreePV(t *testing.T) {
 			}},
 		}
 		client := fake.NewSimpleClientset(mountAll(pod), pvc, pv)
-		r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+		r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 		_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
 		if err == nil {
@@ -243,7 +245,7 @@ func TestResolveMissingVolumeName(t *testing.T) {
 		Spec:       corev1.PodSpec{Volumes: []corev1.Volume{}},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"missing"})
 	if err == nil {
@@ -262,7 +264,7 @@ func TestResolveUnmountedVolume(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(pod)
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"cache"})
 	if err == nil {
@@ -289,7 +291,7 @@ func TestResolveUnmountedVolumeInitContainer(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(pod)
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	if _, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"cache"}); err != nil {
 		t.Fatalf("Resolve() unexpected error for a volume mounted by an init container: %v", err)
@@ -307,7 +309,7 @@ func TestResolveUnmountedHostPath(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(pod)
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	if _, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"hp"}); err == nil {
 		t.Fatal("Resolve() = nil, want error for an unmounted hostPath")
@@ -336,7 +338,7 @@ func TestResolveContainment(t *testing.T) {
 		Spec:       corev1.PersistentVolumeSpec{PersistentVolumeSource: corev1.PersistentVolumeSource{CSI: &corev1.CSIPersistentVolumeSource{Driver: "some.csi.driver"}}},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod), pvc, pv)
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"base-data"})
 	if err == nil {
@@ -350,7 +352,7 @@ func TestResolvePodUIDMismatch(t *testing.T) {
 		Spec:       corev1.PodSpec{Volumes: []corev1.Volume{}},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"x"})
 	if err == nil {
@@ -370,7 +372,7 @@ func TestResolveCycleGuard(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"other-merge"})
 	if err == nil {
@@ -390,7 +392,7 @@ func TestResolveHostPath(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"data"})
 	if err != nil {
@@ -414,7 +416,7 @@ func TestResolveHostPathRelative(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"data"})
 	if err != nil {
@@ -454,7 +456,7 @@ func TestResolveEphemeral(t *testing.T) {
 
 	t.Run("owned by the pod", func(t *testing.T) {
 		client := fake.NewSimpleClientset(mountAll(pod), claim(pod), pv)
-		r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+		r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 		got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"scratch"})
 		if err != nil {
@@ -469,7 +471,7 @@ func TestResolveEphemeral(t *testing.T) {
 	t.Run("owned by another pod", func(t *testing.T) {
 		other := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "other", UID: "other-uid"}}
 		client := fake.NewSimpleClientset(mountAll(pod), claim(other), pv)
-		r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+		r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 		if _, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"scratch"}); err == nil {
 			t.Fatal("Resolve() accepted a claim owned by another pod")
@@ -478,7 +480,7 @@ func TestResolveEphemeral(t *testing.T) {
 
 	t.Run("claim not created yet", func(t *testing.T) {
 		client := fake.NewSimpleClientset(mountAll(pod), pv)
-		r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+		r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 		_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"scratch"})
 		var notReady *NotReadyError
@@ -500,7 +502,7 @@ func TestResolveNFS(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"nfs"})
 	if err != nil {
@@ -528,7 +530,7 @@ func TestResolveISCSI(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"iscsi"})
 	if err != nil {
@@ -552,7 +554,7 @@ func TestResolveFC(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"fc"})
 	if err != nil {
@@ -578,7 +580,7 @@ func TestResolveImageRejected(t *testing.T) {
 		},
 	}
 	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	r := NewResolver(client, testKubeletRoot, testHostPaths, testDriverName)
 
 	if _, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"img"}); err == nil {
 		t.Fatal("Resolve() accepted an image volume")

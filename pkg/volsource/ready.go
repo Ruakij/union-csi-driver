@@ -2,6 +2,7 @@ package volsource
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -23,7 +24,10 @@ func WaitReady(ctx context.Context, mounter mount.Interface, paths []SourcePath,
 	defer ticker.Stop()
 
 	for {
-		pending := notReady(mounter, paths)
+		pending, err := notReady(mounter, paths)
+		if err != nil {
+			return err
+		}
 		if len(pending) == 0 {
 			return nil
 		}
@@ -39,15 +43,20 @@ func WaitReady(ctx context.Context, mounter mount.Interface, paths []SourcePath,
 	}
 }
 
-func notReady(mounter mount.Interface, paths []SourcePath) []string {
+// notReady lists the sources still pending. A policy refusal is final rather
+// than pending, so it ends the wait with the reason instead of a timeout.
+func notReady(mounter mount.Interface, paths []SourcePath) ([]string, error) {
 	var pending []string
 	for _, p := range paths {
 		ok, err := isReady(mounter, p)
+		if errors.Is(err, ErrHostPathNotAllowed) {
+			return nil, err
+		}
 		if err != nil || !ok {
 			pending = append(pending, p.Name)
 		}
 	}
-	return pending
+	return pending, nil
 }
 
 func isReady(mounter mount.Interface, p SourcePath) (bool, error) {
