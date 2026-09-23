@@ -95,7 +95,7 @@ func (r *Resolver) Resolve(ctx context.Context, podNamespace, podName, podUID st
 			return nil, fmt.Errorf("sourceVolumes: pod volume %q is not mounted by any container in this pod, so kubelet never sets it up; add a volumeMount for it in any container", name)
 		}
 
-		sp, err := r.resolveOne(ctx, podNamespace, podVolumesRoot, vol)
+		sp, err := r.resolveOne(ctx, pod, podVolumesRoot, vol)
 		if err != nil {
 			return nil, fmt.Errorf("sourceVolumes: %q: %w", name, err)
 		}
@@ -136,13 +136,13 @@ func referencedVolumes(pod *corev1.Pod) map[string]struct{} {
 	return refs
 }
 
-func (r *Resolver) resolveOne(ctx context.Context, podNamespace, podVolumesRoot string, vol corev1.Volume) (SourcePath, error) {
+func (r *Resolver) resolveOne(ctx context.Context, pod *corev1.Pod, podVolumesRoot string, vol corev1.Volume) (SourcePath, error) {
 	switch {
-	case vol.PersistentVolumeClaim != nil:
-		return r.resolvePVC(ctx, podNamespace, podVolumesRoot, vol)
+	case vol.PersistentVolumeClaim != nil, vol.Ephemeral != nil:
+		return r.resolvePVC(ctx, pod, podVolumesRoot, vol)
 
-	case vol.CSI != nil, vol.Ephemeral != nil:
-		if vol.CSI != nil && vol.CSI.Driver == r.ownDriverName {
+	case vol.CSI != nil:
+		if vol.CSI.Driver == r.ownDriverName {
 			return SourcePath{}, fmt.Errorf("refers to another %s volume in the same pod, which would create a mount cycle", r.ownDriverName)
 		}
 		return SourcePath{
@@ -224,14 +224,26 @@ func (r *Resolver) resolveOne(ctx context.Context, podNamespace, podVolumesRoot 
 	}
 }
 
-func (r *Resolver) resolvePVC(ctx context.Context, podNamespace, podVolumesRoot string, vol corev1.Volume) (SourcePath, error) {
-	claimName := vol.PersistentVolumeClaim.ClaimName
+func (r *Resolver) resolvePVC(ctx context.Context, pod *corev1.Pod, podVolumesRoot string, vol corev1.Volume) (SourcePath, error) {
+	podNamespace := pod.Namespace
+	var claimName string
+	if vol.Ephemeral != nil {
+		// The ephemeral volume controller names the claim after pod and volume.
+		claimName = pod.Name + "-" + vol.Name
+	} else {
+		claimName = vol.PersistentVolumeClaim.ClaimName
+	}
 	pvc, err := r.client.CoreV1().PersistentVolumeClaims(podNamespace).Get(ctx, claimName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return SourcePath{}, notReadyf("PVC %s/%s not found", podNamespace, claimName)
 		}
 		return SourcePath{}, fmt.Errorf("get PVC %s/%s: %w", podNamespace, claimName, err)
+	}
+	// A same-named claim not owned by this pod is someone else's volume; kubelet
+	// refuses it too.
+	if vol.Ephemeral != nil && !metav1.IsControlledBy(pvc, pod) {
+		return SourcePath{}, fmt.Errorf("PVC %s/%s was not created for this pod", podNamespace, claimName)
 	}
 	if pvc.Spec.VolumeName == "" {
 		return SourcePath{}, notReadyf("PVC %s/%s is not yet bound", podNamespace, claimName)

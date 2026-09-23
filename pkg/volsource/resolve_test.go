@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
@@ -394,33 +393,60 @@ func TestResolveEphemeral(t *testing.T) {
 		Spec: corev1.PodSpec{
 			Volumes: []corev1.Volume{
 				{Name: "scratch", VolumeSource: corev1.VolumeSource{
-					Ephemeral: &corev1.EphemeralVolumeSource{
-						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
-							Spec: corev1.PersistentVolumeClaimSpec{
-								StorageClassName: func() *string { s := "hostpath"; return &s }(),
-								Resources: corev1.VolumeResourceRequirements{
-									Requests: corev1.ResourceList{
-										corev1.ResourceStorage: resource.MustParse("1Gi"),
-									},
-								},
-							},
-						},
-					},
+					Ephemeral: &corev1.EphemeralVolumeSource{VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{}},
 				}},
 			},
 		},
 	}
-	client := fake.NewSimpleClientset(mountAll(pod))
-	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "pv-scratch-xyz"},
+		Spec:       corev1.PersistentVolumeSpec{PersistentVolumeSource: corev1.PersistentVolumeSource{CSI: &corev1.CSIPersistentVolumeSource{Driver: "some.csi.driver"}}},
+	}
+	claim := func(owner metav1.Object) *corev1.PersistentVolumeClaim {
+		return &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            testPod + "-scratch",
+				Namespace:       testNamespace,
+				OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(owner, corev1.SchemeGroupVersion.WithKind("Pod"))},
+			},
+			Spec: corev1.PersistentVolumeClaimSpec{VolumeName: pv.Name},
+		}
+	}
 
-	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"scratch"})
-	if err != nil {
-		t.Fatalf("Resolve() unexpected error: %v", err)
-	}
-	want := filepath.Join(podVolumesRoot(), "kubernetes.io~csi", "scratch", "mount")
-	if len(got) != 1 || got[0].Path != want || !got[0].CSIBased {
-		t.Fatalf("Resolve() = %+v, want path %q CSIBased=true", got, want)
-	}
+	t.Run("owned by the pod", func(t *testing.T) {
+		client := fake.NewSimpleClientset(mountAll(pod), claim(pod), pv)
+		r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+		got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"scratch"})
+		if err != nil {
+			t.Fatalf("Resolve() unexpected error: %v", err)
+		}
+		want := filepath.Join(podVolumesRoot(), "kubernetes.io~csi", pv.Name, "mount")
+		if len(got) != 1 || got[0].Path != want || !got[0].CSIBased {
+			t.Fatalf("Resolve() = %+v, want path %q CSIBased=true", got, want)
+		}
+	})
+
+	t.Run("owned by another pod", func(t *testing.T) {
+		other := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "other", UID: "other-uid"}}
+		client := fake.NewSimpleClientset(mountAll(pod), claim(other), pv)
+		r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+		if _, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"scratch"}); err == nil {
+			t.Fatal("Resolve() accepted a claim owned by another pod")
+		}
+	})
+
+	t.Run("claim not created yet", func(t *testing.T) {
+		client := fake.NewSimpleClientset(mountAll(pod), pv)
+		r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
+
+		_, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"scratch"})
+		var notReady *NotReadyError
+		if !errors.As(err, &notReady) {
+			t.Fatalf("Resolve() error = %v, want NotReadyError", err)
+		}
+	})
 }
 
 func TestResolveNFS(t *testing.T) {

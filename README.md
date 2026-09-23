@@ -28,9 +28,9 @@ On top of what overlayfs and mergerfs do themselves:
 
 - **Mounts survive driver restarts, upgrades and evictions**, including the FUSE-based
   mergerfs ones. See [Surviving restarts](#surviving-restarts).
-- **Most volume types as sources.** CSI-backed PVCs, inline CSI volumes, `emptyDir`,
-  `configMap`, `secret`, `downwardAPI`, `projected`, `hostPath`, `nfs`, `iscsi` and
-  `fc`, mixed freely in one merge.
+- **Most volume types as sources.** CSI-backed PVCs, generic ephemeral volumes, inline
+  CSI volumes, `emptyDir`, `configMap`, `secret`, `downwardAPI`, `projected`,
+  `hostPath`, `nfs`, `iscsi` and `fc`, mixed freely in one merge.
 - **Sources by pod volume name.** No node paths, PV names or PVC names in the manifest,
   and no ambiguity when two volumes point at the same claim.
 - **Kubernetes-native waiting.** Sibling volumes are waited for before merging. If they
@@ -104,7 +104,8 @@ Only CSI ephemeral inline volumes are supported. For each union volume, kubelet 
 3. Reads the pod from the API server, checks its UID against the one kubelet injected,
    and maps each named volume to its kubelet publish path under
    `<kubeletRoot>/pods/<podUID>/volumes/`. PVCs are followed to their PV name, since
-   kubelet names their directories that way. hostPath volumes are looked up under the
+   kubelet names their directories that way. Generic ephemeral volumes are followed
+   through their `<pod>-<volume>` claim, which must be owned by the pod. hostPath volumes are looked up under the
    host root bind-mounted at `/host`. Every resolved path must stay inside its root.
 4. Waits up to `publishTimeout` for each source: a real mountpoint for CSI-backed and
    network volumes, an existing directory for the rest. On timeout it returns a
