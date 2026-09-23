@@ -293,16 +293,36 @@ func TestMountWritesState(t *testing.T) {
 	}
 }
 
-// killDaemon SIGKILLs the mergerfs serving target, leaving the mount behind dead
-// the way a daemon dying with its cgroup does.
-func killDaemon(t *testing.T, target string) {
+// A daemon holding the driver's stderr keeps the driver's container from
+// stopping.
+func TestDaemonDoesNotHoldDriverStderr(t *testing.T) {
+	target, _, _, _ := newMount(t, "vol-stdio")
+	var stderr unix.Stat_t
+	if err := unix.Fstat(int(os.Stderr.Fd()), &stderr); err != nil {
+		t.Fatal(err)
+	}
+	for _, pid := range daemonPIDs(t, target) {
+		for _, fd := range []string{"1", "2"} {
+			var st unix.Stat_t
+			if err := unix.Stat(filepath.Join("/proc", strconv.Itoa(pid), "fd", fd), &st); err != nil {
+				t.Fatal(err)
+			}
+			if st.Dev == stderr.Dev && st.Ino == stderr.Ino {
+				t.Errorf("mergerfs %d has the driver's stderr as fd %s", pid, fd)
+			}
+		}
+	}
+}
+
+// daemonPIDs returns the mergerfs processes serving target.
+func daemonPIDs(t *testing.T, target string) []int {
 	t.Helper()
 	var want unix.Stat_t
 	if err := unix.Stat(target, &want); err != nil {
 		t.Fatal(err)
 	}
 	cmdlines, _ := filepath.Glob("/proc/[0-9]*/cmdline")
-	var killed []int
+	var pids []int
 	for _, f := range cmdlines {
 		b, err := os.ReadFile(f)
 		if err != nil {
@@ -320,13 +340,23 @@ func killDaemon(t *testing.T, target string) {
 			continue
 		}
 		pid, _ := strconv.Atoi(filepath.Base(proc))
+		pids = append(pids, pid)
+	}
+	if len(pids) == 0 {
+		t.Fatalf("no mergerfs process serves %s", target)
+	}
+	return pids
+}
+
+// killDaemon SIGKILLs the mergerfs serving target, leaving the mount behind dead
+// the way a daemon dying with its cgroup does.
+func killDaemon(t *testing.T, target string) {
+	t.Helper()
+	killed := daemonPIDs(t, target)
+	for _, pid := range killed {
 		if err := unix.Kill(pid, unix.SIGKILL); err != nil {
 			t.Fatalf("kill %d: %v", pid, err)
 		}
-		killed = append(killed, pid)
-	}
-	if len(killed) == 0 {
-		t.Fatalf("no mergerfs process serves %s", target)
 	}
 	// Waits for the exit rather than for ENOTCONN, which a running reconcile loop
 	// may already have replaced with a new mount.

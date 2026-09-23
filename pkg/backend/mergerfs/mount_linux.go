@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,12 +83,25 @@ func startDaemon(ctx context.Context, st volumeState) error {
 	// A new session detaches the daemon from the driver's controlling terminal and
 	// signal group, so a driver shutdown does not take the mount with it.
 	cmd.SysProcAttr.Setsid = true
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	// Not the driver's own stderr: the container runtime reports the driver
+	// exited only once every holder of its stdio has closed it, and the daemon
+	// outlives the driver.
+	out, w, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("mergerfs: output pipe: %w", err)
+	}
+	cmd.Stdout, cmd.Stderr = w, w
 
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	_ = w.Close()
+	if err != nil {
+		_ = out.Close()
 		return fmt.Errorf("mergerfs: start: %w", err)
 	}
+	go func() {
+		_, _ = io.Copy(os.Stderr, out)
+		_ = out.Close()
+	}()
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 
