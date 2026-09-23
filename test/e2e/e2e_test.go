@@ -217,6 +217,20 @@ func testBackend(t *testing.T, b string) {
 		expectFail(t, auto, "echo x > /.union-csi/sources/rw/x")
 	})
 
+	t.Run("an inline CSI volume serves as a source", func(t *testing.T) {
+		nested, other := "nested-"+b, backends[0]
+		if other == b {
+			other = backends[1]
+		}
+		create(t, pod(nested, emptyDir("rw"), claim("top"), claim("bottom"),
+			union("inner", other+".csi.ruekov.eu", "top=RO,bottom=RO", false, ""),
+			union("merged", driver, "rw,inner=RO", false, "")))
+		t.Cleanup(func() { _ = deletePods(context.Background(), nested) })
+		ready(t, nested)
+		expect(t, nested, "cat /merged/shared /merged/b", "top\nb")
+		expect(t, nested, "echo n > /merged/n && cat "+upper+"/n", "n")
+	})
+
 	t.Run("invalid attributes are refused", func(t *testing.T) {
 		badOpt, badName := "bad-opt-"+b, "bad-name-"+b
 		opt := create(t, pod(badOpt, emptyDir("rw"), union("merged", driver, "rw", false, "upperdir=/etc")))
