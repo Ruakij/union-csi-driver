@@ -4,7 +4,7 @@ package overlay
 
 import (
 	"fmt"
-	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -20,13 +20,13 @@ func mountUnion(spec backend.MountSpec, schema backend.OptionSchema) error {
 		return err
 	}
 
-	if l.upper != "" {
-		if err := os.MkdirAll(l.upper, 0o755); err != nil {
-			return fmt.Errorf("overlay: create upperdir: %w", err)
+	if l.rwRoot != "" {
+		ws, err := openWorkspace(l.rwRoot)
+		if err != nil {
+			return err
 		}
-		if err := os.MkdirAll(l.work, 0o755); err != nil {
-			return fmt.Errorf("overlay: create workdir: %w", err)
-		}
+		defer ws.close()
+		l.upper, l.work = ws.upper, ws.work
 	}
 
 	if dir := l.single(); dir != "" {
@@ -43,6 +43,67 @@ func mountUnion(spec backend.MountSpec, schema backend.OptionSchema) error {
 		return fmt.Errorf("overlay: mount %s: %w", spec.Target, err)
 	}
 	return nil
+}
+
+// workspace holds the RW volume's upper and work directories open. The mount is
+// given their /proc/self/fd paths, so it uses exactly the directories checked
+// here even if the volume is changed in between.
+type workspace struct {
+	fds         []int
+	upper, work string
+}
+
+func openWorkspace(root string) (*workspace, error) {
+	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("overlay: open %s: %w", root, err)
+	}
+	defer func() { _ = unix.Close(rootFD) }()
+
+	wsFD, err := openDirNoFollow(rootFD, root, workspaceDir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = unix.Close(wsFD) }()
+
+	ws := &workspace{}
+	for _, name := range []string{upperName, workName} {
+		fd, err := openDirNoFollow(wsFD, filepath.Join(root, workspaceDir), name)
+		if err != nil {
+			ws.close()
+			return nil, err
+		}
+		ws.fds = append(ws.fds, fd)
+	}
+	ws.upper = fmt.Sprintf("/proc/self/fd/%d", ws.fds[0])
+	ws.work = fmt.Sprintf("/proc/self/fd/%d", ws.fds[1])
+	return ws, nil
+}
+
+func (ws *workspace) close() {
+	for _, fd := range ws.fds {
+		_ = unix.Close(fd)
+	}
+}
+
+// openDirNoFollow creates and opens the directory name under parent, refusing a
+// symlink. The RW volume is pod-writable, so a planted link would otherwise
+// point the writable layer, and the kernel's workdir cleanup, anywhere on the
+// node.
+func openDirNoFollow(parent int, parentPath, name string) (int, error) {
+	path := filepath.Join(parentPath, name)
+	if err := unix.Mkdirat(parent, name, 0o755); err != nil && err != unix.EEXIST {
+		return -1, fmt.Errorf("overlay: create %s: %w", path, err)
+	}
+	fd, err := unix.Openat(parent, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	switch err {
+	case nil:
+		return fd, nil
+	case unix.ELOOP:
+		return -1, fmt.Errorf("overlay: %s is a symlink, refusing to use it", path)
+	default:
+		return -1, fmt.Errorf("overlay: open %s: %w", path, err)
+	}
 }
 
 func unmountUnion(target string) error {

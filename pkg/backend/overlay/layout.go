@@ -23,7 +23,8 @@ const (
 // layout is the driver-computed overlayfs geometry for one mount.
 type layout struct {
 	lowers []string // topmost first
-	upper  string   // empty when every source is RO
+	rwRoot string   // the RW source volume, empty when every source is RO
+	upper  string
 	work   string
 	// readOnly is set when the CSI request asked for it or there is no writable
 	// branch to absorb changes.
@@ -48,6 +49,7 @@ func planLayout(spec backend.MountSpec) (*layout, error) {
 			if i != 0 {
 				return nil, fmt.Errorf("overlay: the RW entry must come first in sourceVolumes, overlay always stacks its writable layer topmost")
 			}
+			l.rwRoot = s.Path
 			l.upper = filepath.Join(s.Path, workspaceDir, upperName)
 			l.work = filepath.Join(s.Path, workspaceDir, workName)
 		case modeRO:

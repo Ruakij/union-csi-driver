@@ -255,3 +255,38 @@ func TestUnmountIsIdempotent(t *testing.T) {
 		t.Fatalf("Unmount of an unmounted path: %v", err)
 	}
 }
+
+// The RW volume is pod-writable, so a symlink planted in it must not redirect
+// the writable layer outside the volume.
+func TestMountRefusesSymlinkedWorkspace(t *testing.T) {
+	for _, link := range []string{workspaceDir, filepath.Join(workspaceDir, upperName)} {
+		t.Run(link, func(t *testing.T) {
+			ws := newWorkspace(t)
+			rw := makeSource(t, ws, "rw", nil)
+			ro := makeSource(t, ws, "ro", map[string]string{"lower.txt": "from-lower"})
+			elsewhere := makeSource(t, ws, "elsewhere", nil)
+			target := makeTarget(t, ws)
+
+			if err := os.MkdirAll(filepath.Join(rw, filepath.Dir(link)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(elsewhere, filepath.Join(rw, link)); err != nil {
+				t.Fatal(err)
+			}
+
+			be := newBackend(t)
+			spec := backend.MountSpec{
+				VolumeID: "vol-symlink",
+				Target:   target,
+				Sources:  []backend.Source{{Path: rw, Mode: modeRW}, {Path: ro, Mode: modeRO}},
+				Options:  be.DefaultOptions(),
+			}
+			if err := be.Mount(context.Background(), spec); err == nil {
+				t.Fatal("Mount succeeded with a symlinked workspace, want an error")
+			}
+			if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
+				t.Errorf("symlink target got %d entries, want none", len(entries))
+			}
+		})
+	}
+}
