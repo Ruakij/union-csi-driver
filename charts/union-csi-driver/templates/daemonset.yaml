@@ -83,6 +83,7 @@ spec:
                   fieldPath: spec.nodeName
           securityContext:
             privileged: true
+            readOnlyRootFilesystem: true
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -121,6 +122,13 @@ spec:
             - --csi-address=/csi/csi.sock
             - --kubelet-registration-path={{ include "union-csi-driver.socketDir" . }}/csi.sock
             - -v={{ .Values.logLevel }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
