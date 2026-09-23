@@ -186,7 +186,7 @@ func TestMountWritesState(t *testing.T) {
 func killDaemon(t *testing.T, target string) {
 	t.Helper()
 	cmdlines, _ := filepath.Glob("/proc/[0-9]*/cmdline")
-	killed := false
+	var killed []int
 	for _, f := range cmdlines {
 		b, err := os.ReadFile(f)
 		if err != nil {
@@ -200,20 +200,21 @@ func killDaemon(t *testing.T, target string) {
 		if err := unix.Kill(pid, unix.SIGKILL); err != nil {
 			t.Fatalf("kill %d: %v", pid, err)
 		}
-		killed = true
+		killed = append(killed, pid)
 	}
-	if !killed {
+	if len(killed) == 0 {
 		t.Fatalf("no mergerfs process serves %s", target)
 	}
+	// Waits for the exit rather than for ENOTCONN, which a running reconcile loop
+	// may already have replaced with a new mount.
 	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if err := unix.Statfs(target, &unix.Statfs_t{}); errors.Is(err, unix.ENOTCONN) {
-			return
+	for _, pid := range killed {
+		for unix.Kill(pid, 0) == nil {
+			if time.Now().After(deadline) {
+				t.Fatalf("mergerfs %d serving %s did not exit after SIGKILL", pid, target)
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s did not become ENOTCONN after killing its daemon", target)
-		}
-		time.Sleep(50 * time.Millisecond)
 	}
 }
 
