@@ -7,10 +7,16 @@ package mergerfs
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
@@ -121,18 +127,45 @@ func TestMountWritesState(t *testing.T) {
 	}
 }
 
-// The reconcile loop is what keeps mounts alive on nodes with no host systemd,
-// where the daemon dies with the driver pod.
+// killDaemon SIGKILLs the mergerfs serving target, leaving the mount behind dead
+// the way a daemon dying with its cgroup does.
+func killDaemon(t *testing.T, target string) {
+	t.Helper()
+	cmdlines, _ := filepath.Glob("/proc/[0-9]*/cmdline")
+	killed := false
+	for _, f := range cmdlines {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		args := strings.Split(string(b), "\x00")
+		if filepath.Base(args[0]) != mergerfsBinary || !slices.Contains(args, target) {
+			continue
+		}
+		pid, _ := strconv.Atoi(filepath.Base(filepath.Dir(f)))
+		if err := unix.Kill(pid, unix.SIGKILL); err != nil {
+			t.Fatalf("kill %d: %v", pid, err)
+		}
+		killed = true
+	}
+	if !killed {
+		t.Fatalf("no mergerfs process serves %s", target)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(target); errors.Is(err, unix.ENOTCONN) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not become ENOTCONN after killing its daemon", target)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func TestReconcileRemountsADeadMount(t *testing.T) {
 	target, stateDir, _, _ := newMount(t, "vol-reconcile")
-
-	// Standing in for the daemon dying with its cgroup.
-	if err := fuseUnmount(target); err != nil {
-		t.Fatalf("fuseUnmount: %v", err)
-	}
-	if isFUSEMount(target) {
-		t.Fatal("target is still a FUSE mount after unmounting it")
-	}
+	killDaemon(t, target)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -142,6 +175,24 @@ func TestReconcileRemountsADeadMount(t *testing.T) {
 		t.Fatal("target was not remounted by reconcileOnce")
 	}
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
+}
+
+// A plain directory is a publish in progress or a rebooted node, and remounting
+// it would race kubelet.
+func TestReconcileLeavesAnUnmountedTargetAlone(t *testing.T) {
+	target, stateDir, _, _ := newMount(t, "vol-plain")
+	if err := fuseUnmount(target); err != nil {
+		t.Fatalf("fuseUnmount: %v", err)
+	}
+
+	reconcileOnce(context.Background(), stateDir)
+
+	if isFUSEMount(target) {
+		t.Fatal("reconcileOnce remounted a plain directory")
+	}
+	if _, err := os.Stat(statePath(stateDir, "vol-plain")); err != nil {
+		t.Fatalf("state was dropped: %v", err)
+	}
 }
 
 func TestReconcileDropsStateForARemovedTarget(t *testing.T) {

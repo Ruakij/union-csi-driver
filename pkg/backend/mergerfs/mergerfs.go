@@ -5,12 +5,21 @@ import (
 	"context"
 	"errors"
 
+	"k8s.io/utils/keymutex"
+
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
 
 func init() {
 	backend.Register("mergerfs", New)
 }
+
+// volumeLocks serializes Mount, Unmount and the reconcile loop per volume, so a
+// remount cannot resurrect a volume that is being unpublished.
+var volumeLocks = keymutex.NewHashed(0)
+
+func lockVolume(id string)   { volumeLocks.LockKey(id) }
+func unlockVolume(id string) { _ = volumeLocks.UnlockKey(id) }
 
 type mergerfsBackend struct {
 	stateDir string
@@ -90,9 +99,13 @@ func (b *mergerfsBackend) Run(ctx context.Context) {
 }
 
 func (b *mergerfsBackend) Mount(ctx context.Context, spec backend.MountSpec) error {
+	lockVolume(spec.VolumeID)
+	defer unlockVolume(spec.VolumeID)
 	return mountUnion(ctx, spec, b.stateDir)
 }
 
 func (b *mergerfsBackend) Unmount(ctx context.Context, volumeID, target string) error {
+	lockVolume(volumeID)
+	defer unlockVolume(volumeID)
 	return unmountUnion(ctx, volumeID, target, b.stateDir)
 }
