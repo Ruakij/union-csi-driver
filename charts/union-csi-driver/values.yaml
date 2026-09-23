@@ -16,6 +16,10 @@ registrar:
     repository: registry.k8s.io/sig-storage/csi-node-driver-registrar
     tag: v2.17.0
     pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 5m
+      memory: 16Mi
 
 # Presets: k3s and RKE2 use /var/lib/kubelet by default but k3s installs that as a
 # symlink to /var/lib/rancher/k3s/agent/kubelet; MicroK8s uses
@@ -78,7 +82,12 @@ tolerations:
   - operator: Exists
 nodeSelector: {}
 affinity: {}
-resources: {}
+# Requests only: a throttled or OOM-killed driver stalls every union mount on the
+# node, and without host systemd the mergerfs daemons share this container's cgroup.
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
 podAnnotations: {}
 podLabels: {}
 updateStrategy:

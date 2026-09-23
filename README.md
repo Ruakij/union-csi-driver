@@ -276,6 +276,7 @@ process. These are always computed on the node.
 | `image.tag`                   | chart `appVersion`                                              | Driver image tag.                                                                                    |
 | `image.pullPolicy`            | `IfNotPresent`                                                  | Driver image pull policy.                                                                            |
 | `registrar.image.*`           | `registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0` | `node-driver-registrar` image, same fields as `image`.                                               |
+| `registrar.resources`         | requests `5m` CPU, `16Mi` memory                                | `node-driver-registrar` container resources.                                                         |
 | `kubeletRootDir`              | `/var/lib/kubelet`                                              | The node's kubelet directory. MicroK8s uses `/var/snap/microk8s/common/var/lib/kubelet`.             |
 | `hostPaths.allowed`           | `[]`                                                            | Host directories hostPath sources may come from; empty disables them, `[/]` allows the whole host.   |
 | `hostPaths.denied`            | system and runtime directories                                  | Host directories refused below the allowed ones. `kubeletRootDir` is always added.                   |
@@ -295,7 +296,7 @@ process. These are always computed on the node.
 | `priorityClassName`           | `system-node-critical`                                          | Priority class of the DaemonSet pods.                                                                |
 | `tolerations`                 | tolerate everything                                             | DaemonSet tolerations.                                                                               |
 | `nodeSelector`, `affinity`    | `{}`                                                            | DaemonSet scheduling constraints.                                                                    |
-| `resources`                   | `{}`                                                            | Driver container resources.                                                                          |
+| `resources`                   | requests `10m` CPU, `32Mi` memory                               | Driver container resources. No limits by default: throttling the driver stalls every mount.          |
 | `podAnnotations`, `podLabels` | `{}`                                                            | Extra metadata on the DaemonSet pods.                                                                |
 | `updateStrategy`              | `RollingUpdate`                                                 | DaemonSet update strategy.                                                                           |
 

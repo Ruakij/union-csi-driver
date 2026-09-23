@@ -136,6 +136,10 @@ spec:
               mountPath: /csi
             - name: registration-dir
               mountPath: /registration
+          {{- with .Values.registrar.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: socket-dir
           hostPath:
