@@ -251,7 +251,7 @@ backend's own default applies.
 | `cache.attr`           | seconds                                                                           | `1`      | How long the kernel caches file attributes.                                          |
 | `cache.negative_entry` | seconds                                                                           | `0`      | How long the kernel caches failed lookups. Keep at 0 if branches change out-of-band. |
 | `cache.readdir`        | `true`, `false`                                                                   | -        | Cache directory listings in the kernel.                                              |
-| `cache.files`          | `off`, `partial`, `full`, `auto-full`, `per-process`, `libfuse`                   | -        | Page cache mode for file contents.                                                   |
+| `cache.files`          | `off`, `partial`, `full`, `auto-full`, `libfuse`                                  | -        | Page cache mode for file contents.                                                   |
 | `func.getattr`         | `ff`, `newest`                                                                    | `newest` | Which branch's attributes are reported when a file exists in several.                |
 | `category.search`      | `ff`, `all`, `newest`                                                             | -        | Policy for finding a file across branches.                                           |
 | `category.create`      | `ff`, `mfs`, `lfs`, `lus`, `pfrd`, `rand`, `newest`, `all`, `msp*`, `ep*` forms   | -        | Which `RW` branch a new file lands on.                                               |

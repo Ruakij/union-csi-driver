@@ -49,13 +49,15 @@ func (b *mergerfsBackend) Name() string { return "mergerfs" }
 // Schema is the set of mergerfs options a pod or admin may set. The branch
 // argument and every option that shapes it or the process (branches,
 // moveonenospc, allow_other) is structurally absent: those are driver-computed.
+// cache.files=per-process is absent too: it looks callers up by pid, which the
+// sandbox's PID namespace hides.
 func (b *mergerfsBackend) Schema() backend.OptionSchema {
 	return backend.OptionSchema{
 		"cache.entry":          {Kind: backend.ValueDuration},
 		"cache.attr":           {Kind: backend.ValueDuration},
 		"cache.negative_entry": {Kind: backend.ValueDuration},
 		"cache.readdir":        {Kind: backend.ValueBool},
-		"cache.files":          {Kind: backend.ValueEnum, Enum: []string{"off", "partial", "full", "auto-full", "per-process", "libfuse"}},
+		"cache.files":          {Kind: backend.ValueEnum, Enum: []string{"off", "partial", "full", "auto-full", "libfuse"}},
 		"func.getattr":         {Kind: backend.ValueEnum, Enum: []string{"ff", "newest"}},
 		"category.search":      {Kind: backend.ValueEnum, Enum: []string{"ff", "all", "newest"}},
 		"category.create": {Kind: backend.ValueEnum, Enum: []string{
