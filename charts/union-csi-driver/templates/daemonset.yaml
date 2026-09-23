@@ -78,6 +78,9 @@ spec:
             {{- with .Values.options.forced }}
             - --forced-options={{ . }}
             {{- end }}
+            {{- if eq $backend "mergerfs" }}
+            - --mergerfs-seal-control-file={{ .Values.mergerfs.sealControlFile }}
+            {{- end }}
             - -v={{ .Values.logLevel }}
           env:
             - name: KUBE_NODE_NAME

@@ -124,8 +124,12 @@ Only CSI ephemeral inline volumes are supported. For each union volume, kubelet 
    - **overlay**: a kernel overlay mount through the `fsopen`/`fsconfig` API where
      available (one argument per layer, no option-length limit), otherwise classic
      `mount(2)`. A single source becomes a bind mount.
-   - **mergerfs**: starts the `mergerfs` daemon without a shell and waits until the
-     target is a live FUSE mount.
+   - **mergerfs**: starts the `mergerfs` daemon without a shell, waits until the
+     target is a live FUSE mount, then bind-mounts its `.mergerfs` control file
+     read-only over itself (`mergerfs.sealControlFile`). mergerfs otherwise lets
+     anyone who can write that file reconfigure the running union through xattrs,
+     adding branches or following symlinks, and root in every consumer container
+     can.
 
 A target that is already mounted counts as published, so kubelet's repeated calls,
 including those after a driver restart, are no-ops. `NodeUnpublishVolume` unmounts the
@@ -197,7 +201,9 @@ read-only regardless.
 
 - **mergerfs** resolves every lookup across branches at request time, so branches may be
   edited out-of-band while mounted. Any number of branches may be `RW`. It has no
-  copy-on-write: it cannot express read-only lowers plus one writable top layer.
+  copy-on-write: it cannot express read-only lowers plus one writable top layer. The
+  runtime interface is read-only by default: `getfattr` on `.mergerfs` works,
+  `setfattr` fails with `EROFS`.
 - **overlay** is kernel-side, with no daemon. It accepts at most one `RW` entry and it
   must be listed first, since the kernel always stacks the single upperdir on top. A
   bare name means `RW`, so mark every other entry `=RO`. The RW entry's merged content
@@ -289,6 +295,7 @@ process. These are always computed on the node.
 | `options.defaults`            | `""` (backend default)                                          | `key=value` options applied unless the pod sets them. Empty uses the backend defaults.               |
 | `options.forced`              | `""`                                                            | `key=value` options applied last, overriding the pod.                                                |
 | `mergerfs.daemonLifetime`     | `auto`                                                          | `auto` uses host systemd where present, `systemd` requires it, `in-container` never uses it.         |
+| `mergerfs.sealControlFile`    | `true`                                                          | Make each union's `.mergerfs` control file read-only, so consumers cannot reconfigure the union.     |
 | `logLevel`                    | `2`                                                             | klog verbosity of both containers.                                                                   |
 | `rbac.create`                 | `true`                                                          | Create the ClusterRole and binding.                                                                  |
 | `serviceAccount.create`       | `true`                                                          | Create the ServiceAccount.                                                                           |

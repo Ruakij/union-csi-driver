@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ import (
 
 const (
 	mergerfsBinary = "mergerfs"
+	controlFile    = ".mergerfs"
 
 	mountWaitTimeout  = 30 * time.Second
 	mountPollInterval = 100 * time.Millisecond
@@ -78,6 +80,13 @@ func startDaemon(ctx context.Context, volumeID, target string, argv []string) er
 		_ = cmd.Process.Kill()
 		return err
 	}
+	if sealControl {
+		if err := sealControlFile(target); err != nil {
+			_ = fuseUnmount(target)
+			_ = cmd.Process.Kill()
+			return err
+		}
+	}
 	klog.V(4).Infof("mergerfs: mounted %s (pid %d)", target, cmd.Process.Pid)
 	// Deliberately not bound to ctx, which belongs to the publish request: the
 	// daemon outlives it, and so must the watch on its exit.
@@ -85,6 +94,21 @@ func startDaemon(ctx context.Context, volumeID, target string, argv []string) er
 		<-exited
 		requestReconcile()
 	}()
+	return nil
+}
+
+// sealControlFile bind-mounts the .mergerfs control file read-only over itself.
+// mergerfs applies setxattr on it (branches, follow-symlinks, ...) for anyone
+// who may write the file, which includes root in every consumer container.
+func sealControlFile(target string) error {
+	ctl := filepath.Join(target, controlFile)
+	if err := unix.Mount(ctl, ctl, "", unix.MS_BIND, ""); err != nil {
+		return fmt.Errorf("mergerfs: bind %s: %w", ctl, err)
+	}
+	flags := uintptr(unix.MS_BIND | unix.MS_REMOUNT | unix.MS_RDONLY | unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC)
+	if err := unix.Mount("", ctl, "", flags, ""); err != nil {
+		return fmt.Errorf("mergerfs: remount %s read-only: %w", ctl, err)
+	}
 	return nil
 }
 

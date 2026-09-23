@@ -144,6 +144,20 @@ func TestMountMergesBranches(t *testing.T) {
 	wantContent(t, filepath.Join(target, "late.txt"), "late")
 }
 
+func TestMountSealsControlFile(t *testing.T) {
+	target, _, _, _ := newMount(t, "vol-seal")
+	ctl := filepath.Join(target, controlFile)
+
+	if err := unix.Setxattr(ctl, "user.mergerfs.follow-symlinks", []byte("all"), 0); !errors.Is(err, unix.EROFS) {
+		t.Fatalf("setxattr on %s = %v, want EROFS", ctl, err)
+	}
+	buf := make([]byte, 64)
+	n, err := unix.Getxattr(ctl, "user.mergerfs.follow-symlinks", buf)
+	if err != nil || string(buf[:n]) != "never" {
+		t.Fatalf("follow-symlinks = %q, %v; want never", buf[:n], err)
+	}
+}
+
 func TestMountWritesState(t *testing.T) {
 	target, stateDir, _, _ := newMount(t, "vol-state")
 
@@ -217,10 +231,15 @@ func TestReconcileRemountsADeadMount(t *testing.T) {
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
 }
 
+func sealed(target string) bool {
+	var st unix.Statfs_t
+	return unix.Statfs(filepath.Join(target, controlFile), &st) == nil && st.Flags&unix.ST_RDONLY != 0
+}
+
 func waitRemounted(t *testing.T, target string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
-	for !isFUSEMount(target) {
+	for !isFUSEMount(target) || !sealed(target) {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s was not remounted within 10s", target)
 		}

@@ -18,7 +18,7 @@ import (
 
 	"github.com/Ruakij/union-csi-driver/internal/proxy"
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
-	_ "github.com/Ruakij/union-csi-driver/pkg/backend/mergerfs"
+	"github.com/Ruakij/union-csi-driver/pkg/backend/mergerfs"
 	_ "github.com/Ruakij/union-csi-driver/pkg/backend/overlay"
 	"github.com/Ruakij/union-csi-driver/pkg/driver"
 )
@@ -104,6 +104,8 @@ func main() {
 	flag.StringVar(&denylistMode, "denylist-mode", "refuse", "how to handle a denied pod option: refuse | strip")
 	flag.Var(kvFlag{&policyCfg.Defaults}, "default-options", "comma-separated key=value backend options applied when the pod does not set them")
 	flag.Var(kvFlag{&policyCfg.Forced}, "forced-options", "comma-separated key=value backend options applied last, not pod-overridable")
+
+	mergerfs.RegisterFlags(flag.CommandLine)
 
 	showVersion := flag.Bool("version", false, "show version")
 	// The proxy-endpoint option is intended to be used by the Kubernetes E2E test

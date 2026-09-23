@@ -4,6 +4,7 @@ package mergerfs
 import (
 	"context"
 	"errors"
+	"flag"
 
 	"k8s.io/utils/keymutex"
 
@@ -20,6 +21,14 @@ var volumeLocks = keymutex.NewHashed(0)
 
 func lockVolume(id string)   { volumeLocks.LockKey(id) }
 func unlockVolume(id string) { _ = volumeLocks.UnlockKey(id) }
+
+var sealControl = true
+
+// RegisterFlags adds the backend's startup flags to fs.
+func RegisterFlags(fs *flag.FlagSet) {
+	fs.BoolVar(&sealControl, "mergerfs-seal-control-file", sealControl,
+		"bind-mount each union's .mergerfs control file read-only over itself, so consumers cannot reconfigure the union")
+}
 
 type mergerfsBackend struct {
 	stateDir string
