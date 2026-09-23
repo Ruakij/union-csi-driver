@@ -52,7 +52,7 @@ On top of what overlayfs and mergerfs do themselves:
 - **One binary, one image, one chart.** Both backends ship in the same image. Pick one
   per Helm release, or install twice to offer both.
 - **Node-only.** No controller, provisioner or attacher, just a DaemonSet with
-  `node-driver-registrar`.
+  `node-driver-registrar` and `livenessprobe`.
 
 ## Surviving restarts
 
@@ -305,6 +305,8 @@ process. These are always computed on the node.
 | `image.pullPolicy`            | `IfNotPresent`                                                  | Driver image pull policy.                                                                            |
 | `registrar.image.*`           | `registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0` | `node-driver-registrar` image, same fields as `image`.                                               |
 | `registrar.resources`         | requests `5m` CPU, `16Mi` memory                                | `node-driver-registrar` container resources.                                                         |
+| `livenessProbe.image.*`       | `registry.k8s.io/sig-storage/livenessprobe:v2.20.0`             | `livenessprobe` sidecar image, same fields as `image`.                                               |
+| `livenessProbe.resources`     | requests `5m` CPU, `16Mi` memory                                | `livenessprobe` sidecar resources.                                                                   |
 | `kubeletRootDir`              | `/var/lib/kubelet`                                              | The node's kubelet directory. MicroK8s uses `/var/snap/microk8s/common/var/lib/kubelet`.             |
 | `hostPaths.allowed`           | `[]`                                                            | Host directories hostPath sources may come from; empty disables them, `[/]` allows the whole host.   |
 | `hostPaths.denied`            | system and runtime directories                                  | Host directories refused below the allowed ones. `kubeletRootDir` is always added.                   |

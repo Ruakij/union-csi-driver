@@ -21,6 +21,18 @@ registrar:
       cpu: 5m
       memory: 16Mi
 
+# Sidecar serving /healthz for the driver container's liveness probe, by calling
+# the driver's CSI Probe over its socket.
+livenessProbe:
+  image:
+    repository: registry.k8s.io/sig-storage/livenessprobe
+    tag: v2.20.0
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 5m
+      memory: 16Mi
+
 # Presets: k3s and RKE2 use /var/lib/kubelet by default but k3s installs that as a
 # symlink to /var/lib/rancher/k3s/agent/kubelet; MicroK8s uses
 # /var/snap/microk8s/common/var/lib/kubelet.
