@@ -102,15 +102,17 @@ func startDaemon(ctx context.Context, st volumeState) error {
 		_, _ = io.Copy(os.Stderr, out)
 		_ = out.Close()
 	}()
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
-
+	// Reaped only once adopted: until then a daemon that already died keeps its
+	// pid, which the scope would otherwise take from whatever process reuses it.
 	if systemdAvailable() {
 		if err := adoptIntoScope(ctx, scopeUnitName(volumeID), cmd.Process.Pid); err != nil {
 			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
 			return err
 		}
 	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
 
 	if err := waitMounted(ctx, target, exited); err != nil {
 		_ = cmd.Process.Kill()
