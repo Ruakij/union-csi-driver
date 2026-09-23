@@ -41,12 +41,18 @@ jobs:
           sbom: true
           provenance: mode=max
 
-  # Both publishing routes run off the same tag so the repo index and the OCI
-  # registry cannot drift apart.
-  chart:
+  # One GitHub release per tag with the chart attached, the OCI chart, and for
+  # stable versions the index on gh-pages, all off the same tag so they cannot
+  # drift apart.
+  release:
     runs-on: ubuntu-latest
     needs: image
+    # Serialised because stable releases push to gh-pages.
+    concurrency:
+      group: release
+      cancel-in-progress: false
     steps:
+      # Full history also fetches gh-pages for the index update.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -61,17 +67,7 @@ jobs:
           sed -i "s/^version: .*/version: ${version}/" charts/union-csi-driver/Chart.yaml
           sed -i "s/^appVersion: .*/appVersion: \"${version}\"/" charts/union-csi-driver/Chart.yaml
           helm lint charts/union-csi-driver
-      - run: |
-          git config user.name "${GITHUB_ACTOR}"
-          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-      # Prereleases go to the OCI registry only: the index on gh-pages is what
-      # `helm repo add` resolves, and it should list stable versions.
-      - if: ${{ !contains(github.ref_name, '-') }}
-        uses: helm/chart-releaser-action@v1
-        with:
-          charts_dir: charts
-        env:
-          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          helm package charts/union-csi-driver -d dist
       - name: Push chart to GHCR
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -79,5 +75,26 @@ jobs:
           # OCI references must be lowercase, and the owner login is not.
           owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin <<<"${GITHUB_TOKEN}"
-          helm package charts/union-csi-driver -d dist
           helm push dist/union-csi-driver-*.tgz "oci://ghcr.io/${owner}/charts"
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=
+          case "${GITHUB_REF_NAME}" in *-*) prerelease=--prerelease ;; esac
+          gh release create "${GITHUB_REF_NAME}" dist/union-csi-driver-*.tgz --verify-tag --generate-notes ${prerelease}
+      # Prereleases stay out of the index: it is what `helm repo add` resolves, and
+      # it should list stable versions.
+      - name: Add the chart to the Helm repository index
+        if: ${{ !contains(github.ref_name, '-') }}
+        run: |
+          git config --global user.name "${GITHUB_ACTOR}"
+          git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          git worktree add pages origin/gh-pages
+          helm repo index dist --merge pages/index.yaml \
+            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          cp dist/index.yaml pages/index.yaml
+          cd pages
+          git add index.yaml
+          git commit -m "Add union-csi-driver ${GITHUB_REF_NAME#v}"
+          git push origin HEAD:gh-pages
