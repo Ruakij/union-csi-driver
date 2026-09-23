@@ -51,7 +51,9 @@ func (b *mergerfsBackend) Name() string { return "mergerfs" }
 // moveonenospc, allow_other) is structurally absent: those are driver-computed.
 // cache.files=per-process is absent too: it looks callers up by pid, which the
 // sandbox's PID namespace hides. follow-symlinks needs the sandbox, where a
-// followed symlink reaches nothing but the volume's own branches.
+// followed symlink reaches nothing but the volume's own branches. link-exdev's
+// absolute forms and symlinkify create links to paths only the daemon sees, as
+// does rename-exdev, whose relative form mergerfs fails at.
 func (b *mergerfsBackend) Schema() backend.OptionSchema {
 	s := backend.OptionSchema{
 		"cache.entry":          {Kind: backend.ValueDuration},
@@ -69,6 +71,7 @@ func (b *mergerfsBackend) Schema() backend.OptionSchema {
 		"inodecalc":        {Kind: backend.ValueEnum, Enum: []string{"passthrough", "path-hash", "devino-hash", "hybrid-hash", "path-hash32", "devino-hash32", "hybrid-hash32"}},
 		"threads":          {Kind: backend.ValueInt, MinInt: -16, MaxInt: 1024},
 		"minfreespace":     {Kind: backend.ValueSize},
+		"link-exdev":       {Kind: backend.ValueEnum, Enum: []string{"passthrough", "rel-symlink"}},
 	}
 	if useSandbox {
 		s["follow-symlinks"] = backend.OptionSpec{Kind: backend.ValueEnum, Enum: []string{"never", "directory", "regular", "all"}}

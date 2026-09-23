@@ -262,13 +262,14 @@ backend's own default applies.
 | `inodecalc`            | `passthrough`, `path-hash`, `devino-hash`, `hybrid-hash`, and their `32` variants | -        | How inode numbers of merged files are computed.                                      |
 | `threads`              | -16 to 1024                                                                       | -        | Worker threads: 0 for one per CPU, negative to divide the CPU count.                 |
 | `minfreespace`         | size, e.g. `4G`                                                                   | -        | Minimum free space for a branch to receive new files.                                |
+| `link-exdev`           | `passthrough`, `rel-symlink`                                                      | -        | On a cross-branch hard link, create a relative symlink instead of failing.           |
 | `follow-symlinks`      | `never`, `directory`, `regular`, `all`                                            | -        | Serve what symlinks point at instead of the links. Only with `mergerfs.sandbox`.     |
 
 `follow-symlinks` resolves links inside the sandbox, so it reaches only the volume's own
 branches; links pointing anywhere else are served as links. Without the sandbox it would
-reach the whole node, so the option is refused there. `symlinkify`, `link-exdev` and
-`rename-exdev` are left out: the links they create point at branch paths only the daemon
-sees.
+reach the whole node, so the option is refused there. `symlinkify` and the absolute forms
+of `link-exdev` and `rename-exdev` are left out, as the links they create point at paths
+only the daemon sees. `rename-exdev=rel-symlink` fails with `ENOENT` in mergerfs itself.
 
 #### overlay:
 
