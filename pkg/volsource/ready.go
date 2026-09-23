@@ -52,7 +52,10 @@ func notReady(mounter mount.Interface, paths []SourcePath) []string {
 
 func isReady(mounter mount.Interface, p SourcePath) (bool, error) {
 	if !p.CSIBased {
-		_, err := os.Stat(p.Path)
+		path, err := p.RealPath()
+		if err == nil {
+			_, err = os.Stat(path)
+		}
 		if err != nil {
 			if os.IsNotExist(err) {
 				return false, nil

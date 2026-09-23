@@ -3,6 +3,7 @@ package volsource
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -581,5 +582,48 @@ func TestResolveImageRejected(t *testing.T) {
 
 	if _, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"img"}); err == nil {
 		t.Fatal("Resolve() accepted an image volume")
+	}
+}
+
+func TestRealPath(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"mnt/disk", "srv"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		"data":     "/mnt/disk",
+		"srv/rel":  "../mnt/disk",
+		"escape":   "../../../../mnt/disk",
+		"rootlink": "/",
+		"loop":     "loop",
+	} {
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, tc := range []struct{ path, want string }{
+		{"mnt/disk", "mnt/disk"},
+		{"data", "mnt/disk"},
+		{"srv/rel", "mnt/disk"},
+		{"escape", "mnt/disk"},
+		{"rootlink/srv", "srv"},
+	} {
+		got, err := SourcePath{Path: filepath.Join(root, tc.path), Root: root}.RealPath()
+		if err != nil {
+			t.Fatalf("RealPath(%s): %v", tc.path, err)
+		}
+		if want := filepath.Join(root, tc.want); got != want {
+			t.Errorf("RealPath(%s) = %s, want %s", tc.path, got, want)
+		}
+	}
+
+	if _, err := (SourcePath{Path: filepath.Join(root, "missing"), Root: root}).RealPath(); !os.IsNotExist(err) {
+		t.Errorf("RealPath(missing) error = %v, want not-exist", err)
+	}
+	if _, err := (SourcePath{Path: filepath.Join(root, "loop"), Root: root}).RealPath(); err == nil {
+		t.Error("RealPath(loop) succeeded")
 	}
 }

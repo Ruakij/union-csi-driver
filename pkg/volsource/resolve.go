@@ -6,6 +6,7 @@ package volsource
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -290,4 +291,55 @@ func assertContained(root, resolved string) error {
 		return fmt.Errorf("resolved path %q escapes %q", resolved, root)
 	}
 	return nil
+}
+
+// maxSymlinks matches the kernel's own limit before ELOOP.
+const maxSymlinks = 40
+
+// RealPath resolves symlinks in p.Path as if Root were "/". A hostPath directory
+// that is an absolute symlink on the node, e.g. /data -> /mnt/disk, must lead to
+// <hostRoot>/mnt/disk, whereas the kernel would follow it inside this container.
+func (p SourcePath) RealPath() (string, error) {
+	if p.Root == "" {
+		return p.Path, nil
+	}
+	rel, err := filepath.Rel(p.Root, p.Path)
+	if err != nil {
+		return "", err
+	}
+	pending := strings.Split(rel, string(filepath.Separator))
+	cur := "/"
+	links := 0
+	for len(pending) > 0 {
+		c := pending[0]
+		pending = pending[1:]
+		switch c {
+		case "", ".":
+			continue
+		case "..":
+			cur = filepath.Dir(cur)
+			continue
+		}
+		next := filepath.Join(cur, c)
+		fi, err := os.Lstat(filepath.Join(p.Root, next))
+		if err != nil {
+			return "", err
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			cur = next
+			continue
+		}
+		if links++; links > maxSymlinks {
+			return "", fmt.Errorf("%s: too many levels of symbolic links", p.Path)
+		}
+		target, err := os.Readlink(filepath.Join(p.Root, next))
+		if err != nil {
+			return "", err
+		}
+		if filepath.IsAbs(target) {
+			cur = "/"
+		}
+		pending = append(strings.Split(target, string(filepath.Separator)), pending...)
+	}
+	return filepath.Join(p.Root, cur), nil
 }

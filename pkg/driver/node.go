@@ -87,7 +87,11 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 
 	sources := make([]backend.Source, len(resolved))
 	for i, sp := range resolved {
-		sources[i] = backend.Source{Path: sp.Path, Mode: modeByName[sp.Name]}
+		path, err := sp.RealPath()
+		if err != nil {
+			return nil, status.Errorf(codes.Aborted, "source volume %q: %v", sp.Name, err)
+		}
+		sources[i] = backend.Source{Path: path, Mode: modeByName[sp.Name]}
 	}
 
 	if err := os.MkdirAll(req.GetTargetPath(), 0o755); err != nil {
