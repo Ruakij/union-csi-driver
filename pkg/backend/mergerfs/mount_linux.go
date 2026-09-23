@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	mergerfsBinary   = "mergerfs"
-	fusermountBinary = "fusermount"
+	mergerfsBinary = "mergerfs"
 
 	mountWaitTimeout  = 30 * time.Second
 	mountPollInterval = 100 * time.Millisecond
@@ -195,15 +194,9 @@ func isFUSEMount(target string) bool {
 	return st.Type == fuseSuperMagic
 }
 
-// fuseUnmount prefers fusermount, which drops the mount without needing the
-// daemon to cooperate, and falls back to a lazy umount where it is unavailable.
+// fuseUnmount detaches lazily, so it succeeds even when the daemon is dead or
+// consumers still hold files open.
 func fuseUnmount(target string) error {
-	out, err := exec.Command(fusermountBinary, "-u", "-z", target).CombinedOutput()
-	if err == nil {
-		return nil
-	}
-	klog.V(4).Infof("mergerfs: fusermount -uz %s: %v (%s), falling back to umount", target, err, out)
-
 	switch err := unix.Unmount(target, unix.MNT_DETACH); err {
 	case nil, unix.EINVAL, unix.ENOENT:
 		// EINVAL: not a mountpoint. Unmount must tolerate being called twice.
