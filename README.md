@@ -249,6 +249,11 @@ backend's own default applies.
 | `threads`              | -16 to 1024                                                                       | -        | Worker threads: 0 for one per CPU, negative to divide the CPU count.                 |
 | `minfreespace`         | size, e.g. `4G`                                                                   | -        | Minimum free space for a branch to receive new files.                                |
 
+Options that widen what mergerfs can reach, such as `follow-symlinks`, `symlinkify`,
+`link-exdev` and `rename-exdev`, are left out of the schema on purpose, so neither pods
+nor admins can set them. mergerfs runs in the driver's mount namespace, where following
+a symlink out of a branch can reach every volume on the node.
+
 #### overlay:
 
 | Option                | Values                      | Default    | Description                                                                        |
