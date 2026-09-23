@@ -308,9 +308,9 @@ process. These are always computed on the node.
 | `image.repository`            | `ghcr.io/ruakij/union-csi-driver`                               | Driver image.                                                                                        |
 | `image.tag`                   | chart `appVersion`                                              | Driver image tag.                                                                                    |
 | `image.pullPolicy`            | `IfNotPresent`                                                  | Driver image pull policy.                                                                            |
-| `registrar.image.*`           | `registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0` | `node-driver-registrar` image, same fields as `image`.                                               |
+| `registrar.image.*`           | `registry.k8s.io/sig-storage/csi-node-driver-registrar`         | `node-driver-registrar` image, same fields as `image`.                                               |
 | `registrar.resources`         | requests `5m` CPU, `16Mi` memory                                | `node-driver-registrar` container resources.                                                         |
-| `livenessProbe.image.*`       | `registry.k8s.io/sig-storage/livenessprobe:v2.20.0`             | `livenessprobe` sidecar image, same fields as `image`.                                               |
+| `livenessProbe.image.*`       | `registry.k8s.io/sig-storage/livenessprobe`                     | `livenessprobe` sidecar image, same fields as `image`.                                               |
 | `livenessProbe.resources`     | requests `5m` CPU, `16Mi` memory                                | `livenessprobe` sidecar resources.                                                                   |
 | `kubeletRootDir`              | `/var/lib/kubelet`                                              | The node's kubelet directory. MicroK8s uses `/var/snap/microk8s/common/var/lib/kubelet`.             |
 | `hostPaths.allowed`           | `[]`                                                            | Host directories hostPath sources may come from; empty disables them, `[/]` allows the whole host.   |
