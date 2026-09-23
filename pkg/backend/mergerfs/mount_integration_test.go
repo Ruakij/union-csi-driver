@@ -8,6 +8,7 @@ package mergerfs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -223,6 +224,55 @@ func TestSandboxHidesTheHost(t *testing.T) {
 			t.Errorf("/proc/self through a branch added at runtime = %v, %v; want only fd", ents, err)
 		}
 	}
+}
+
+// A file the driver inherits must not reach the daemon, where a symlink it follows
+// through /proc/self/fd would open it on the host.
+func TestSandboxKeepsInheritedFilesOut(t *testing.T) {
+	root := sharedDir(t)
+	secret := makeSource(t, root, "secret", map[string]string{"key": "secret"})
+	fd, err := unix.Open(secret, unix.O_PATH|unix.O_DIRECTORY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(fd)
+	src := makeSource(t, root, "src", nil)
+	if err := os.Symlink(fmt.Sprintf("/proc/self/fd/%d/key", fd), filepath.Join(src, "leak")); err != nil {
+		t.Fatal(err)
+	}
+	target := mountSources(t, root, "vol-inherit", map[string]string{"follow-symlinks": "all"}, src)
+
+	// Not followed by the daemon, the link comes back as is, and the test's own fd
+	// would resolve it.
+	leak := filepath.Join(target, "leak")
+	if fi, err := os.Lstat(leak); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		return
+	}
+	if b, err := os.ReadFile(leak); err == nil && string(b) == "secret" {
+		t.Error("read a host file through a file descriptor the daemon inherited")
+	}
+}
+
+// mountSources publishes a merge of RW sources under root and returns its target.
+func mountSources(t *testing.T, root, volumeID string, options map[string]string, sources ...string) string {
+	t.Helper()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	be := &mergerfsBackend{}
+	if err := be.Init(filepath.Join(root, "state")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = be.Unmount(context.Background(), volumeID, target) })
+	spec := backend.MountSpec{VolumeID: volumeID, Target: target, Options: options}
+	for _, s := range sources {
+		spec.Sources = append(spec.Sources, backend.Source{Path: s, Mode: modeRW})
+	}
+	if err := be.Mount(context.Background(), spec); err != nil {
+		t.Fatalf("Mount: %v", err)
+	}
+	return target
 }
 
 // mergerfs reopens an already open file through /proc/self/fd, the only part of

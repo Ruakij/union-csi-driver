@@ -3,7 +3,7 @@ module github.com/Ruakij/union-csi-driver
 go 1.27.1
 
 require (
-	github.com/Ruakij/fuse-sandbox v0.1.0
+	github.com/Ruakij/fuse-sandbox v0.1.3
 	github.com/container-storage-interface/spec v1.13.0
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/godbus/dbus/v5 v5.2.2
