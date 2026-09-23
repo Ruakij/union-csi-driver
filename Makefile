@@ -71,3 +71,9 @@ FUZZTIME ?= 30s
 fuzz:
 	go test -run '^$$' -fuzz FuzzParseAttributes -fuzztime $(FUZZTIME) ./pkg/driver
 	go test -run '^$$' -fuzz FuzzRealPath -fuzztime $(FUZZTIME) ./pkg/volsource
+
+# Installs the chart for both backends into a kind cluster and checks real pods.
+# E2E_KEEP=1 leaves the cluster running.
+.PHONY: e2e
+e2e:
+	go test -tags e2e -count=1 -timeout 30m -v ./test/e2e

@@ -1,8 +1,8 @@
 version: "2"
 
 run:
-  # Mount-level tests are linted too, even though only the mount CI job runs them.
-  build-tags: [mounttest]
+  # Mount-level and e2e tests are linted too, even though only their own CI jobs run them.
+  build-tags: [mounttest, e2e]
 
 linters:
   enable:

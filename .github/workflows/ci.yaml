@@ -109,6 +109,20 @@ jobs:
       - run: make test-mount
       - run: make test-mount-systemd
 
+  # The chart installed per backend on a kind cluster, with real pods mounting
+  # through kubelet.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+      - run: make e2e
+
   helm:
     runs-on: ubuntu-latest
     steps:

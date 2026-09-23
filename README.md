@@ -346,6 +346,11 @@ helm template test charts/union-csi-driver
 
 Mount code is Linux-only; on a non-Linux machine, build and vet with `GOOS=linux`.
 
+`make test-mount` runs the mount-level tests in a privileged container. `make e2e`
+installs the chart for both backends into a [kind](https://kind.sigs.k8s.io) cluster
+and checks merged views, writes, restarts and cleanup from real pods; `E2E_KEEP=1`
+leaves the cluster running.
+
 `git config core.hooksPath .githooks` enables the pre-commit hook, which runs gofmt,
 vet, tests and golangci-lint on the staged packages, and `helm lint` when the chart
 changed.
