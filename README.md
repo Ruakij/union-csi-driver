@@ -228,6 +228,7 @@ backend's own default applies.
 | `cache.files`          | `off`, `partial`, `full`, `auto-full`, `per-process`, `libfuse`                   | -        | Page cache mode for file contents.                                                   |
 | `func.getattr`         | `ff`, `newest`                                                                    | `newest` | Which branch's attributes are reported when a file exists in several.                |
 | `category.search`      | `ff`, `all`, `newest`                                                             | -        | Policy for finding a file across branches.                                           |
+| `category.create`      | `ff`, `mfs`, `lfs`, `lus`, `pfrd`, `rand`, `newest`, `all`, `msp*`, `ep*` forms   | -        | Which `RW` branch a new file lands on.                                               |
 | `dropcacheonclose`     | `true`, `false`                                                                   | -        | Drop a file's page cache when it is closed.                                          |
 | `inodecalc`            | `passthrough`, `path-hash`, `devino-hash`, `hybrid-hash`, and their `32` variants | -        | How inode numbers of merged files are computed.                                      |
 | `threads`              | -16 to 1024                                                                       | -        | Worker threads: 0 for one per CPU, negative to divide the CPU count.                 |
@@ -252,8 +253,8 @@ editing lower layers at all. `metacopy` together with `userxattr` would let an
 unprivileged writer forge overlay redirects on a lower layer, hence the denylist.
 
 Some options cannot be set at all, by pods or admins: branch lists, `lowerdir`,
-`upperdir`, `workdir`, `category.create`, `allow_other` and anything else that carries a
-path or shapes the process. These are always computed on the node.
+`upperdir`, `workdir`, `allow_other` and anything else that carries a path or shapes the
+process. These are always computed on the node.
 
 ### Chart values
 

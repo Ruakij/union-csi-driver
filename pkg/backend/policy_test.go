@@ -120,7 +120,7 @@ func TestPolicyValidate(t *testing.T) {
 
 	t.Run("unknown key in forced options fails startup", func(t *testing.T) {
 		p := NewPolicy(testSchema(), PolicyConfig{
-			Forced: map[string]string{"category.create": "mfs"},
+			Forced: map[string]string{"allow_other": "true"},
 		})
 		if err := p.Validate(); err == nil {
 			t.Fatal("Validate() = nil, want error for unknown forced option")

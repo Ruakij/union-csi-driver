@@ -33,8 +33,7 @@ type OptionSpec struct {
 
 // OptionSchema maps an option name to its spec. This is the ground truth for what
 // a backend accepts, independent of admin allow/deny policy. Path-bearing or
-// process-shaping options (lowerdir, upperdir, branches, category.create,
-// allow_other, ...) are never present here - they are driver-computed and so are
+// process-shaping options (lowerdir, upperdir, branches, allow_other, ...) are never present here - they are driver-computed and so are
 // structurally absent from anything a pod or admin can set.
 type OptionSchema map[string]OptionSpec
 

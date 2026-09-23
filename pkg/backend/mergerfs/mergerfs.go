@@ -34,8 +34,7 @@ func (b *mergerfsBackend) Name() string { return "mergerfs" }
 
 // Schema is the set of mergerfs options a pod or admin may set. The branch
 // argument and every option that shapes it or the process (branches,
-// category.create, moveonenospc, allow_other) is structurally absent: those are
-// driver-computed.
+// moveonenospc, allow_other) is structurally absent: those are driver-computed.
 func (b *mergerfsBackend) Schema() backend.OptionSchema {
 	return backend.OptionSchema{
 		"cache.entry":          {Kind: backend.ValueDuration},
@@ -45,10 +44,14 @@ func (b *mergerfsBackend) Schema() backend.OptionSchema {
 		"cache.files":          {Kind: backend.ValueEnum, Enum: []string{"off", "partial", "full", "auto-full", "per-process", "libfuse"}},
 		"func.getattr":         {Kind: backend.ValueEnum, Enum: []string{"ff", "newest"}},
 		"category.search":      {Kind: backend.ValueEnum, Enum: []string{"ff", "all", "newest"}},
-		"dropcacheonclose":     {Kind: backend.ValueBool},
-		"inodecalc":            {Kind: backend.ValueEnum, Enum: []string{"passthrough", "path-hash", "devino-hash", "hybrid-hash", "path-hash32", "devino-hash32", "hybrid-hash32"}},
-		"threads":              {Kind: backend.ValueInt, MinInt: -16, MaxInt: 1024},
-		"minfreespace":         {Kind: backend.ValueSize},
+		"category.create": {Kind: backend.ValueEnum, Enum: []string{
+			"all", "epall", "ff", "epff", "lfs", "eplfs", "lus", "eplus", "mfs", "epmfs",
+			"msplfs", "msplus", "mspmfs", "msppfrd", "newest", "pfrd", "eppfrd", "rand", "eprand",
+		}},
+		"dropcacheonclose": {Kind: backend.ValueBool},
+		"inodecalc":        {Kind: backend.ValueEnum, Enum: []string{"passthrough", "path-hash", "devino-hash", "hybrid-hash", "path-hash32", "devino-hash32", "hybrid-hash32"}},
+		"threads":          {Kind: backend.ValueInt, MinInt: -16, MaxInt: 1024},
+		"minfreespace":     {Kind: backend.ValueSize},
 	}
 }
 
