@@ -27,6 +27,8 @@ const (
 	ns       = "e2e"
 	image    = "union-csi-driver"
 	busybox  = "busybox:1.37"
+	// The oldest release serving MutatingAdmissionPolicy as v1, which auto-mount needs.
+	kindNode = "kindest/node:v1.37.0"
 	repoRoot = "../.."
 )
 
@@ -63,7 +65,7 @@ func TestMain(m *testing.M) {
 
 func setup() error {
 	if out, _ := run("kind", "get", "clusters"); !slices.Contains(strings.Fields(out), cluster) {
-		if err := stream(exec.Command("kind", "create", "cluster", "--name", cluster, "--wait", "120s")); err != nil {
+		if err := stream(exec.Command("kind", "create", "cluster", "--name", cluster, "--image", kindNode, "--wait", "120s")); err != nil {
 			return err
 		}
 	}
