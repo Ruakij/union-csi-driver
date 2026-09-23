@@ -525,7 +525,7 @@ func TestResolveFC(t *testing.T) {
 	}
 }
 
-func TestResolveImage(t *testing.T) {
+func TestResolveImageRejected(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: testPod, Namespace: testNamespace, UID: types.UID(testUID)},
 		Spec: corev1.PodSpec{
@@ -541,12 +541,7 @@ func TestResolveImage(t *testing.T) {
 	client := fake.NewSimpleClientset(mountAll(pod))
 	r := NewResolver(client, testKubeletRoot, testHostRoot, testDriverName)
 
-	got, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"img"})
-	if err != nil {
-		t.Fatalf("Resolve() unexpected error: %v", err)
-	}
-	want := filepath.Join(podVolumesRoot(), "kubernetes.io~image", "img")
-	if len(got) != 1 || got[0].Path != want || !got[0].CSIBased {
-		t.Fatalf("Resolve() = %+v, want path %q CSIBased=true", got, want)
+	if _, err := r.Resolve(context.Background(), testNamespace, testPod, testUID, []string{"img"}); err == nil {
+		t.Fatal("Resolve() accepted an image volume")
 	}
 }

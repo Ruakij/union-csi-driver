@@ -212,12 +212,7 @@ func (r *Resolver) resolveOne(ctx context.Context, pod *corev1.Pod, podVolumesRo
 		}, nil
 
 	case vol.Image != nil:
-		return SourcePath{
-			Name:     vol.Name,
-			Path:     filepath.Join(podVolumesRoot, "kubernetes.io~image", vol.Name),
-			CSIBased: true,
-			Root:     podVolumesRoot,
-		}, nil
+		return SourcePath{}, fmt.Errorf("image volumes are mounted by the container runtime into the container only, and never appear on the node")
 
 	default:
 		return SourcePath{}, fmt.Errorf("unsupported volume source")
