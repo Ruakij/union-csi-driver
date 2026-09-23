@@ -169,8 +169,14 @@ func TestMountMergesBranches(t *testing.T) {
 func TestSandboxHidesTheHost(t *testing.T) {
 	root := sharedDir(t)
 	secret := makeSource(t, root, "secret", map[string]string{"key": "secret"})
-	src := makeSource(t, root, "src", nil)
-	if err := os.Symlink(secret, filepath.Join(src, "escape")); err != nil {
+	src := makeSource(t, root, "src", map[string]string{"file": "inside"})
+	links := map[string]string{"escape": secret, "environ": "/proc/1/environ", "mem": "/proc/self/mem"}
+	for name, dst := range links {
+		if err := os.Symlink(dst, filepath.Join(src, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("file", filepath.Join(src, "inner")); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(root, "target")
@@ -185,7 +191,6 @@ func TestSandboxHidesTheHost(t *testing.T) {
 	defer func(v bool) { sealControl = v }(sealControl)
 	sealControl = false
 
-	// Options the schema refuses, set here to show they reach nothing.
 	spec := backend.MountSpec{
 		VolumeID: "vol-sandbox",
 		Target:   target,
@@ -196,10 +201,15 @@ func TestSandboxHidesTheHost(t *testing.T) {
 		t.Fatalf("Mount: %v", err)
 	}
 
-	// Unable to follow it, mergerfs returns the link itself, which the reader then
-	// resolves in its own mount namespace.
-	if fi, err := os.Lstat(filepath.Join(target, "escape")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("escape = %v, %v; want the unfollowed symlink", fi, err)
+	if fi, err := os.Lstat(filepath.Join(target, "inner")); err != nil || !fi.Mode().IsRegular() {
+		t.Errorf("inner = %v, %v; want the followed regular file", fi, err)
+	}
+	// Unable to follow them, mergerfs returns the links themselves, which the
+	// reader then resolves in its own mount namespace.
+	for name := range links {
+		if fi, err := os.Lstat(filepath.Join(target, name)); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s = %v, %v; want the unfollowed symlink", name, fi, err)
+		}
 	}
 	ctl := filepath.Join(target, controlFile)
 	if err := unix.Setxattr(ctl, "user.mergerfs.branches", []byte("+>"+secret), 0); err == nil {
@@ -207,6 +217,28 @@ func TestSandboxHidesTheHost(t *testing.T) {
 			t.Error("read a host file through a branch added at runtime")
 		}
 	}
+	if err := unix.Setxattr(ctl, "user.mergerfs.branches", []byte("+>/proc"), 0); err == nil {
+		ents, err := os.ReadDir(filepath.Join(target, "self"))
+		if err != nil || len(ents) != 1 || ents[0].Name() != "fd" {
+			t.Errorf("/proc/self through a branch added at runtime = %v, %v; want only fd", ents, err)
+		}
+	}
+}
+
+// mergerfs reopens an already open file through /proc/self/fd, the only part of
+// proc in the sandbox.
+func TestMountReopensAnOpenFile(t *testing.T) {
+	target, _, _, _ := newMount(t, "vol-reopen")
+	path := filepath.Join(target, "rw.txt")
+	first, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	if err := os.WriteFile(path, []byte("rewritten"), 0o644); err != nil {
+		t.Fatalf("write while open: %v", err)
+	}
+	wantContent(t, path, "rewritten")
 }
 
 func TestMountWithoutSandbox(t *testing.T) {

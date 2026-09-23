@@ -131,15 +131,16 @@ Only CSI ephemeral inline volumes are supported. For each union volume, kubelet 
      without following symlinks and handed to the kernel by file descriptor, so
      what gets mounted is the directory that was checked.
    - **mergerfs**: starts the `mergerfs` daemon without a shell, in a sandbox
-     (`mergerfs.sandbox`): new mount and PID namespaces whose read-only tmpfs root
-     holds only the branches at `/branch/<n>`, the target at `/union`, `/dev/fuse`,
-     `/dev/null`, the binary and a `/proc` showing only the daemon. `RO` branches,
-     and all of them for a `readOnly` volume, are bound read-only. Only the mount on
-     `/union` propagates out to the target. Once the target is a live FUSE mount,
-     the driver bind-mounts its `.mergerfs` control file read-only over itself
-     (`mergerfs.sealControlFile`). mergerfs otherwise lets anyone who can write that
-     file reconfigure the running union through xattrs, reordering or dropping
-     branches or changing policies, and root in every consumer container can.
+     (`mergerfs.sandbox`): new namespaces whose read-only tmpfs root holds only the
+     branches at `/branch/<n>`, the target at `/union`, `/dev/fuse`, `/dev/null`,
+     the binary and `/proc/self/fd`, with no network and only the capabilities for
+     mounting and handling files. `RO` branches, and all of them for a `readOnly`
+     volume, are bound read-only. Only the mount on `/union` propagates out to the
+     target. Once the target is a live FUSE mount, the driver bind-mounts its
+     `.mergerfs` control file read-only over itself (`mergerfs.sealControlFile`).
+     mergerfs otherwise lets anyone who can write that file reconfigure the running
+     union through xattrs, reordering or dropping branches or changing policies, and
+     root in every consumer container can.
 
 A target that is already mounted counts as published, so kubelet's repeated calls,
 including those after a driver restart, are no-ops. `NodeUnpublishVolume` unmounts the
