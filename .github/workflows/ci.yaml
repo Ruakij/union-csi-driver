@@ -15,6 +15,12 @@ on:
 permissions:
   contents: read
 
+# A push supersedes the run of the commit before it, so drop that one instead of
+# waiting for a verdict on code nobody has any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   go:
     runs-on: ubuntu-latest

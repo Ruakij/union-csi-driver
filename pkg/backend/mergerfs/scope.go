@@ -14,10 +14,6 @@ const (
 	scopeSuffix = ".scope"
 )
 
-func isScopeUnit(name string) bool {
-	return strings.HasPrefix(name, scopePrefix) && strings.HasSuffix(name, scopeSuffix)
-}
-
 // sanitizeUnitName keeps only characters valid in a systemd unit name. CSI volume
 // IDs are driver-generated and already tame, but the unit name reaches a host
 // service manager, so it is not a place to assume.

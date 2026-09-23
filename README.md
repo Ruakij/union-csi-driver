@@ -313,3 +313,7 @@ helm template test charts/union-csi-driver
 ```
 
 Mount code is Linux-only; on a non-Linux machine, build and vet with `GOOS=linux`.
+
+`git config core.hooksPath .githooks` enables the pre-commit hook, which runs gofmt,
+vet, tests and golangci-lint on the staged packages, and `helm lint` when the chart
+changed.

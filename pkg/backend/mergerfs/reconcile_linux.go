@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"time"
 
 	systemd "github.com/coreos/go-systemd/v22/dbus"
@@ -150,4 +151,8 @@ func reconcileVolume(ctx context.Context, stateDir string, st volumeState) {
 	if err := startDaemon(ctx, st.VolumeID, st.Target, st.Argv); err != nil {
 		klog.Errorf("mergerfs: reconcile: remount %s: %v", st.Target, err)
 	}
+}
+
+func isScopeUnit(name string) bool {
+	return strings.HasPrefix(name, scopePrefix) && strings.HasSuffix(name, scopeSuffix)
 }

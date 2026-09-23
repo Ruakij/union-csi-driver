@@ -1,7 +1,9 @@
 /bin
 .*
 !.gitignore
+!.githooks
 !.github
 !.dockerignore
 !.helmignore
 !.vscode/
+!.golangci.yml

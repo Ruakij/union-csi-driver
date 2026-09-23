@@ -70,10 +70,10 @@ func (b *overlayBackend) MaxWritable() int {
 	return 1
 }
 
-func (b *overlayBackend) Mount(ctx context.Context, spec backend.MountSpec) error {
+func (b *overlayBackend) Mount(_ context.Context, spec backend.MountSpec) error {
 	return mountUnion(spec, b.Schema())
 }
 
-func (b *overlayBackend) Unmount(ctx context.Context, volumeID, target string) error {
+func (b *overlayBackend) Unmount(_ context.Context, _, target string) error {
 	return unmountUnion(target)
 }

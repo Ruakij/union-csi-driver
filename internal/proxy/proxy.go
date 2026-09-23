@@ -55,11 +55,11 @@ func Run(ctx context.Context, endpoint1, endpoint2 string) (io.Closer, error) {
 	var err error
 	proxy.s1, proxy.cleanup1, err = endpoint.Listen(endpoint1)
 	if err != nil {
-		return nil, fmt.Errorf("listen %s: %v", endpoint1, err)
+		return nil, fmt.Errorf("listen %s: %w", endpoint1, err)
 	}
 	proxy.s2, proxy.cleanup2, err = endpoint.Listen(endpoint2)
 	if err != nil {
-		return nil, fmt.Errorf("listen %s: %v", endpoint2, err)
+		return nil, fmt.Errorf("listen %s: %w", endpoint2, err)
 	}
 
 	klog.V(3).Infof("proxy listening on %s and %s", endpoint1, endpoint2)
