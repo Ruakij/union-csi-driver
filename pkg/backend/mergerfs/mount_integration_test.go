@@ -193,7 +193,7 @@ func killDaemon(t *testing.T, target string) {
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if _, err := os.Stat(target); errors.Is(err, unix.ENOTCONN) {
+		if err := unix.Statfs(target, &unix.Statfs_t{}); errors.Is(err, unix.ENOTCONN) {
 			return
 		}
 		if time.Now().After(deadline) {

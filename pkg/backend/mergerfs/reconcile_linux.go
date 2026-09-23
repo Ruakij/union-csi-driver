@@ -123,7 +123,8 @@ func reconcileVolume(ctx context.Context, stateDir string, st volumeState) {
 
 	// Only a dead FUSE mount answers with ENOTCONN. A plain directory is either a
 	// mount still being set up, or a node that rebooted, where kubelet republishes.
-	_, err := os.Stat(st.Target)
+	// statfs, unlike stat, is never answered from the kernel's attribute cache.
+	err := unix.Statfs(st.Target, &unix.Statfs_t{})
 	switch {
 	case errors.Is(err, unix.ENOTCONN):
 	case err == nil:
