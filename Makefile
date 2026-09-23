@@ -63,3 +63,10 @@ test-mount: test-mount-image
 .PHONY: test-mount-systemd
 test-mount-systemd:
 	$(MAKE) test-mount MOUNTTEST_DOCKER_FLAGS="--pid=host -v /run/systemd:/run/systemd -e MOUNTTEST_SYSTEMD=1"
+
+# The seed corpus runs with every go test; this explores beyond it.
+FUZZTIME ?= 30s
+
+.PHONY: fuzz
+fuzz:
+	go test -run '^$$' -fuzz FuzzParseAttributes -fuzztime $(FUZZTIME) ./pkg/driver

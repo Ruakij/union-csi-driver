@@ -28,6 +28,7 @@ jobs:
       - name: go vet (linux)
         run: GOOS=linux go vet ./...
       - run: go test -race ./...
+      - run: make fuzz
       # Read from a plain file so the upstream-sync workflow can bump it without a
       # token carrying the workflow scope.
       - id: lint-version

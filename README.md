@@ -44,7 +44,7 @@ On top of what overlayfs and mergerfs do themselves:
   per-backend schema and an admin allowlist, denylist, defaults and forced set.
 - **Safe by construction.** Pods never choose the backend and never pass paths or
   process-shaping options. Everything that ends up on a mount command line or in a
-  syscall is computed on the node.
+  syscall is computed on the node. CI fuzzes the attribute parser and option policy.
 - **One binary, one image, one chart.** Both backends ship in the same image. Pick one
   per Helm release, or install twice to offer both.
 - **Node-only.** No controller, provisioner or attacher, just a DaemonSet with
