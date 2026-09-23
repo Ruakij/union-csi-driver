@@ -40,7 +40,7 @@ func reconcile(ctx context.Context, stateDir string) {
 	tick := time.NewTicker(reconcileInterval)
 	defer tick.Stop()
 	var last time.Time
-	for {
+	for first := true; ; first = false {
 		// A daemon that dies right after mounting must not turn the wake into a
 		// tight remount loop.
 		if wait := minReconcileGap - time.Since(last); wait > 0 {
@@ -51,7 +51,7 @@ func reconcile(ctx context.Context, stateDir string) {
 			}
 		}
 		last = time.Now()
-		reconcileOnce(ctx, stateDir)
+		reconcileOnce(ctx, stateDir, first)
 		select {
 		case <-tick.C:
 		case <-wakeReconcile:
@@ -97,7 +97,9 @@ func watchScopes(ctx context.Context, wake func()) error {
 	return nil
 }
 
-func reconcileOnce(ctx context.Context, stateDir string) {
+// reconcileOnce checks every volume in stateDir. logLive reports the live mounts,
+// which on startup are the ones an earlier driver left running.
+func reconcileOnce(ctx context.Context, stateDir string, logLive bool) {
 	states, err := loadStates(stateDir)
 	if err != nil {
 		klog.Errorf("mergerfs: reconcile: %v", err)
@@ -105,11 +107,11 @@ func reconcileOnce(ctx context.Context, stateDir string) {
 	}
 
 	for _, st := range states {
-		reconcileVolume(ctx, stateDir, st)
+		reconcileVolume(ctx, stateDir, st, logLive)
 	}
 }
 
-func reconcileVolume(ctx context.Context, stateDir string, st volumeState) {
+func reconcileVolume(ctx context.Context, stateDir string, st volumeState, logLive bool) {
 	lockVolume(st.VolumeID)
 	defer unlockVolume(st.VolumeID)
 
@@ -118,6 +120,9 @@ func reconcileVolume(ctx context.Context, stateDir string, st volumeState) {
 		return
 	}
 	if isFUSEMount(st.Target) {
+		if logLive {
+			klog.Infof("mergerfs: found live mount %s", st.Target)
+		}
 		return
 	}
 

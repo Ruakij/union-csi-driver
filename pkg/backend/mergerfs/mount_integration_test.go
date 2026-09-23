@@ -252,7 +252,7 @@ func TestMountWithoutSandbox(t *testing.T) {
 		t.Fatalf("loadStates = %+v, %v; want one unsandboxed entry", states, err)
 	}
 	killDaemon(t, target)
-	reconcileOnce(context.Background(), stateDir)
+	reconcileOnce(context.Background(), stateDir, false)
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
 }
 
@@ -377,7 +377,7 @@ func TestReconcileRemountsADeadMount(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	reconcileOnce(ctx, stateDir)
+	reconcileOnce(ctx, stateDir, false)
 
 	if !isFUSEMount(target) {
 		t.Fatal("target was not remounted by reconcileOnce")
@@ -426,7 +426,7 @@ func TestReconcileLeavesAnUnmountedTargetAlone(t *testing.T) {
 		t.Fatalf("fuseUnmount: %v", err)
 	}
 
-	reconcileOnce(context.Background(), stateDir)
+	reconcileOnce(context.Background(), stateDir, false)
 
 	if isFUSEMount(target) {
 		t.Fatal("reconcileOnce remounted a plain directory")
@@ -448,7 +448,7 @@ func TestReconcileDropsStateForARemovedTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reconcileOnce(context.Background(), stateDir)
+	reconcileOnce(context.Background(), stateDir, false)
 
 	if states, err := loadStates(stateDir); err != nil || len(states) != 0 {
 		t.Fatalf("loadStates = %v, %v; want empty, nil", states, err)
