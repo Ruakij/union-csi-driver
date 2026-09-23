@@ -5,4 +5,3 @@
 !.dockerignore
 !.helmignore
 !.vscode/
-!.trivyignore.yaml

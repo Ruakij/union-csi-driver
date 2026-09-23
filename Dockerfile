@@ -41,13 +41,13 @@ RUN set -eu; \
     mkdir /mergerfs; \
     tar -xzf /tmp/mergerfs.tar.gz -C /mergerfs
 
-FROM alpine
+# Both binaries are static, so the image needs nothing else: no shell or tools for
+# anyone who gets code execution in this privileged container.
+FROM scratch
 LABEL description="union-csi-driver"
 
-# mergerfs and fusermount ship in every image regardless of --backend: the
-# container is privileged either way, so a binary the overlay backend never execs
-# is not meaningful attack surface, and it keeps this to one build lane.
-RUN apk add --no-cache util-linux coreutils fuse
+# mergerfs ships regardless of --backend, which keeps this to one build lane.
+ENV PATH=/usr/local/bin
 COPY --from=mergerfs /mergerfs/usr/local/bin/mergerfs /usr/local/bin/mergerfs
 COPY --from=build /out/union-csi-driver /union-csi-driver
 ENTRYPOINT ["/union-csi-driver"]
