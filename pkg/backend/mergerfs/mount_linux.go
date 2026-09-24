@@ -70,6 +70,25 @@ func mountUnion(ctx context.Context, spec backend.MountSpec, stateDir string) er
 	return nil
 }
 
+// shareUnion records the view so reconcile can bind it again: a bind of a dead
+// FUSE mount stays dead after its source is remounted.
+func shareUnion(ctx context.Context, volumeID, source, target string, readOnly bool, stateDir string) error {
+	// The source is a FUSE mount a moment before its control file is sealed, and
+	// a bind taken in between would not carry the seal.
+	if err := waitServing(ctx, source); err != nil {
+		return err
+	}
+	st := volumeState{VolumeID: volumeID, Target: target, SharedFrom: source, ReadOnly: readOnly}
+	if err := saveState(stateDir, st); err != nil {
+		return err
+	}
+	if err := backend.BindMount(source, target, readOnly); err != nil {
+		_ = removeState(stateDir, volumeID)
+		return fmt.Errorf("mergerfs: %w", err)
+	}
+	return nil
+}
+
 // startDaemon launches mergerfs and returns once the target is a live FUSE mount.
 func startDaemon(ctx context.Context, st volumeState) error {
 	volumeID, target := st.VolumeID, st.Target
@@ -270,6 +289,33 @@ func waitMounted(ctx context.Context, target string, exited <-chan error) error 
 			return ctx.Err()
 		}
 	}
+}
+
+func waitServing(ctx context.Context, target string) error {
+	deadline := time.NewTimer(mountWaitTimeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(mountPollInterval)
+	defer tick.Stop()
+
+	for !serving(target) {
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			return fmt.Errorf("mergerfs: %s is not a live, sealed mount after %s", target, mountWaitTimeout)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func serving(target string) bool {
+	return isFUSEMount(target) && (!sealControl || sealed(target))
+}
+
+func sealed(target string) bool {
+	var st unix.Statfs_t
+	return unix.Statfs(filepath.Join(target, controlFile), &st) == nil && st.Flags&unix.ST_RDONLY != 0
 }
 
 func isFUSEMount(target string) bool {

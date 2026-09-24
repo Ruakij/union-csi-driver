@@ -233,6 +233,18 @@ func testBackend(t *testing.T, b string) {
 		expect(t, nested, "echo n > /merged/n && cat "+upper+"/n", "n")
 	})
 
+	t.Run("a union declared twice is mounted once", func(t *testing.T) {
+		twice := "twice-" + b
+		create(t, pod(twice, emptyDir("rw"), claim("top"),
+			union("merged", driver, "rw,top=RO", false, ""),
+			union("again", driver, "rw,top=RO", false, "")))
+		t.Cleanup(func() { _ = deletePods(context.Background(), twice) })
+		ready(t, twice)
+		expect(t, twice, "echo w > /merged/w && cat /again/w /again/shared", "w\ntop")
+		// Two separate mounts would each have their own device number.
+		expect(t, twice, `[ "$(stat -c %d /merged)" = "$(stat -c %d /again)" ] && echo same`, "same")
+	})
+
 	t.Run("invalid attributes are refused", func(t *testing.T) {
 		badOpt, badName := "bad-opt-"+b, "bad-name-"+b
 		opt := create(t, pod(badOpt, emptyDir("rw"), union("merged", driver, "rw", false, "upperdir=/etc")))

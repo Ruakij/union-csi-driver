@@ -267,16 +267,8 @@ func mountClassic(l *layout, target string, schema backend.OptionSchema) error {
 }
 
 func bindMount(source, target string, readOnly bool) error {
-	if err := unix.Mount(source, target, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
-		return fmt.Errorf("overlay: bind %s to %s: %w", source, target, err)
-	}
-	if !readOnly {
-		return nil
-	}
-	// A bind mount cannot be made read-only in one step; MS_RDONLY is only honoured
-	// by a follow-up remount.
-	if err := unix.Mount("", target, "", unix.MS_REMOUNT|unix.MS_BIND|unix.MS_RDONLY, ""); err != nil {
-		return fmt.Errorf("overlay: remount %s read-only: %w", target, err)
+	if err := backend.BindMount(source, target, readOnly); err != nil {
+		return fmt.Errorf("overlay: %w", err)
 	}
 	return nil
 }

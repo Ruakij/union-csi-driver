@@ -135,6 +135,12 @@ func (b *mergerfsBackend) Mount(ctx context.Context, spec backend.MountSpec) err
 	return mountUnion(ctx, spec, b.stateDir)
 }
 
+func (b *mergerfsBackend) Share(ctx context.Context, volumeID, source, target string, readOnly bool) error {
+	lockVolume(volumeID)
+	defer unlockVolume(volumeID)
+	return shareUnion(ctx, volumeID, source, target, readOnly, b.stateDir)
+}
+
 func (b *mergerfsBackend) Unmount(ctx context.Context, volumeID, target string) error {
 	lockVolume(volumeID)
 	defer unlockVolume(volumeID)

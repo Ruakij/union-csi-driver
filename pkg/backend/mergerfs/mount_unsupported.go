@@ -16,6 +16,10 @@ func mountUnion(context.Context, backend.MountSpec, string) error {
 	return errUnsupported
 }
 
+func shareUnion(context.Context, string, string, string, bool, string) error {
+	return errUnsupported
+}
+
 func unmountUnion(context.Context, string, string, string) error {
 	return errUnsupported
 }

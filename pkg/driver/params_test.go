@@ -23,6 +23,9 @@ func (b *fakeBackend) DefaultOptions() map[string]string              { return n
 func (b *fakeBackend) DefaultDenylist() []string                      { return nil }
 func (b *fakeBackend) Mount(context.Context, backend.MountSpec) error { return nil }
 func (b *fakeBackend) Unmount(context.Context, string, string) error  { return nil }
+func (b *fakeBackend) Share(context.Context, string, string, string, bool) error {
+	return nil
+}
 
 func newTestDriver(maxSourceVolumes int, be backend.Backend) *Driver {
 	return &Driver{config: Config{MaxSourceVolumes: maxSourceVolumes, Backend: be}}

@@ -142,6 +142,17 @@ Only CSI ephemeral inline volumes are supported. For each union volume, kubelet 
      union through xattrs, reordering or dropping branches or changing policies, and
      root in every consumer container can.
 
+A pod may declare the same union more than once, for example to mount it into
+containers under different volume names. With `reuseMounts` (the default),
+the first such volume in the pod spec that a container mounts sets up the union, and
+the others wait for it and bind its mount, so they share one overlay mount or one
+mergerfs daemon. Volumes are the same union when their `sourceVolumes`, `options` and
+`readOnly` match exactly. Overlay needs this for a union with an `RW` branch: two
+overlay mounts would share its upper and work directories. The kernel does not allow
+that, and either fails the second mount with `EBUSY` or leaves file access through
+both undefined. For mergerfs, a shared view is bound again once a crashed daemon is
+remounted. Unions of different pods are never shared.
+
 A target that is already mounted counts as published, so kubelet's repeated calls,
 including those after a driver restart, are no-ops. `NodeUnpublishVolume` unmounts the
 union, cleans up, and succeeds if the volume is already gone.
@@ -318,6 +329,7 @@ process. These are always computed on the node.
 | `hostPaths.mountDir`          | `/host`                                                         | Where the allowed directories are mounted inside the driver container.                               |
 | `publishTimeout`              | `30s`                                                           | How long a mount waits for its source volumes before failing and letting kubelet retry.              |
 | `maxSourceVolumes`            | `32`                                                            | Maximum `sourceVolumes` entries per union volume.                                                    |
+| `reuseMounts`                 | `true`                                                          | Mount a union declared several times in one pod once, and bind it for the other volumes.             |
 | `options.allowlist`           | `""`                                                            | Backend options pods may set. Empty allows every schema option that is not denied.                   |
 | `options.denylist`            | `""` (backend default)                                          | Backend options pods may not set. Empty uses the backend's default denylist.                         |
 | `options.denylistMode`        | `refuse`                                                        | What happens to a denied pod option: `refuse` fails the mount, `strip` drops the option and logs it. |

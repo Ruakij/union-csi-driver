@@ -80,8 +80,10 @@ type Backend interface {
 	// Mount performs the union mount described by spec. Must be idempotent: callers
 	// check mountinfo first, but Mount may be called again after a driver restart.
 	Mount(ctx context.Context, spec MountSpec) error
-	// Unmount tears down a mount previously created by Mount. Must tolerate the
-	// target already being unmounted.
+	// Share makes target a second view of the union Mount put at source.
+	Share(ctx context.Context, volumeID, source, target string, readOnly bool) error
+	// Unmount tears down a mount previously created by Mount or Share. Must
+	// tolerate the target already being unmounted.
 	Unmount(ctx context.Context, volumeID, target string) error
 }
 

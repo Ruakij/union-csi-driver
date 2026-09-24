@@ -18,3 +18,7 @@ func mountUnion(backend.MountSpec, backend.OptionSchema) error {
 func unmountUnion(string) error {
 	return errUnsupported
 }
+
+func bindMount(string, string, bool) error {
+	return errUnsupported
+}

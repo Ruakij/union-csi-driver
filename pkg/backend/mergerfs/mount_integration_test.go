@@ -463,11 +463,6 @@ func TestReconcileRemountsADeadMount(t *testing.T) {
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
 }
 
-func sealed(target string) bool {
-	var st unix.Statfs_t
-	return unix.Statfs(filepath.Join(target, controlFile), &st) == nil && st.Flags&unix.ST_RDONLY != 0
-}
-
 func waitRemounted(t *testing.T, target string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -533,5 +528,76 @@ func TestReconcileDropsStateForARemovedTarget(t *testing.T) {
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Errorf("stat target = %v, want not-exist", err)
+	}
+}
+
+func newShare(t *testing.T, target, stateDir, volumeID string) string {
+	t.Helper()
+	view := filepath.Join(filepath.Dir(target), "view-"+volumeID)
+	if err := os.MkdirAll(view, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	be := &mergerfsBackend{stateDir: stateDir}
+	t.Cleanup(func() { _ = be.Unmount(context.Background(), volumeID, view) })
+	if err := be.Share(context.Background(), volumeID, target, view, false); err != nil {
+		t.Fatalf("Share: %v", err)
+	}
+	return view
+}
+
+func TestShareBindsTheUnion(t *testing.T) {
+	target, stateDir, rw, _ := newMount(t, "vol-shared")
+	view := newShare(t, target, stateDir, "vol-shared-2")
+
+	if !isFUSEMount(view) {
+		t.Fatal("view is not a FUSE mount")
+	}
+	// The bind is recursive, so the seal on the control file comes along.
+	if !sealed(view) {
+		t.Error("control file is not sealed in the view")
+	}
+	wantContent(t, filepath.Join(view, "ro.txt"), "from-ro")
+	if err := os.WriteFile(filepath.Join(view, "new.txt"), []byte("via-view"), 0o644); err != nil {
+		t.Fatalf("write through the view: %v", err)
+	}
+	wantContent(t, filepath.Join(rw, "new.txt"), "via-view")
+	if got := len(daemonPIDs(t, target)); got != 1 {
+		t.Errorf("%d daemons serve the union, want 1", got)
+	}
+}
+
+// A bind of a dead FUSE mount stays dead after its source is remounted, so the
+// same pass must bind it again.
+func TestReconcileRebindsASharedView(t *testing.T) {
+	target, stateDir, _, _ := newMount(t, "vol-rebind")
+	view := newShare(t, target, stateDir, "vol-rebind-2")
+	killDaemon(t, target)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	reconcileOnce(ctx, stateDir, false)
+
+	for _, p := range []string{target, view} {
+		if !isFUSEMount(p) || !sealed(p) {
+			t.Fatalf("%s was not brought back by reconcileOnce", p)
+		}
+		wantContent(t, filepath.Join(p, "ro.txt"), "from-ro")
+	}
+}
+
+func TestReconcileDropsStateForARemovedShare(t *testing.T) {
+	target, stateDir, _, _ := newMount(t, "vol-share-gone")
+	view := newShare(t, target, stateDir, "vol-share-gone-2")
+	if err := fuseUnmount(view); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(view); err != nil {
+		t.Fatal(err)
+	}
+
+	reconcileOnce(context.Background(), stateDir, false)
+
+	if _, err := os.Stat(statePath(stateDir, "vol-share-gone-2")); !os.IsNotExist(err) {
+		t.Fatalf("stat shared state = %v, want not-exist", err)
 	}
 }

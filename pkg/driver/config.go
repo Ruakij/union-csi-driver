@@ -20,6 +20,7 @@ type Config struct {
 	StateDir         string
 	PublishTimeout   time.Duration
 	MaxSourceVolumes int
+	ReuseMounts      bool
 
 	Backend    backend.Backend
 	Policy     *backend.Policy

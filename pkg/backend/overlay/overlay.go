@@ -74,6 +74,11 @@ func (b *overlayBackend) Mount(_ context.Context, spec backend.MountSpec) error 
 	return mountUnion(spec, b.Schema())
 }
 
+// Share binds source: the kernel keeps the overlay alive while either mount exists.
+func (b *overlayBackend) Share(_ context.Context, _, source, target string, readOnly bool) error {
+	return bindMount(source, target, readOnly)
+}
+
 func (b *overlayBackend) Unmount(_ context.Context, _, target string) error {
 	return unmountUnion(target)
 }

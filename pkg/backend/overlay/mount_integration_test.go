@@ -347,3 +347,72 @@ func TestMountRefusesUnsupportedUpperFS(t *testing.T) {
 		t.Errorf("workspace was created on the refused filesystem: %v", err)
 	}
 }
+
+// A shared view is the same overlay: writes through either land in the one upper,
+// and it outlives the mount it was bound from.
+func TestShareIsTheSameOverlay(t *testing.T) {
+	ws := newWorkspace(t)
+	rw := makeSource(t, ws, "rw", nil)
+	ro := makeSource(t, ws, "ro", map[string]string{"lower.txt": "from-lower"})
+	target := makeTarget(t, ws)
+	view := filepath.Join(ws, "view")
+	if err := os.MkdirAll(view, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unmountUnion(view) })
+
+	be := newBackend(t)
+	spec := backend.MountSpec{
+		VolumeID: "vol-share",
+		Target:   target,
+		Sources:  []backend.Source{{Path: rw, Mode: modeRW}, {Path: ro, Mode: modeRO}},
+		Options:  be.DefaultOptions(),
+	}
+	if err := be.Mount(context.Background(), spec); err != nil {
+		t.Fatalf("Mount: %v", err)
+	}
+	if err := be.Share(context.Background(), "vol-share-2", target, view, false); err != nil {
+		t.Fatalf("Share: %v", err)
+	}
+
+	wantContent(t, filepath.Join(view, "lower.txt"), "from-lower")
+	if err := os.WriteFile(filepath.Join(view, "new.txt"), []byte("via-view"), 0o644); err != nil {
+		t.Fatalf("write through the view: %v", err)
+	}
+	wantContent(t, filepath.Join(target, "new.txt"), "via-view")
+	wantContent(t, filepath.Join(rw, workspaceDir, upperName, "new.txt"), "via-view")
+
+	if err := be.Unmount(context.Background(), "vol-share", target); err != nil {
+		t.Fatalf("Unmount: %v", err)
+	}
+	wantContent(t, filepath.Join(view, "new.txt"), "via-view")
+}
+
+func TestShareReadOnly(t *testing.T) {
+	ws := newWorkspace(t)
+	rw := makeSource(t, ws, "rw", nil)
+	target := makeTarget(t, ws)
+	view := filepath.Join(ws, "view")
+	if err := os.MkdirAll(view, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unmountUnion(view) })
+
+	be := newBackend(t)
+	spec := backend.MountSpec{
+		VolumeID: "vol-share-ro",
+		Target:   target,
+		Sources:  []backend.Source{{Path: rw, Mode: modeRW}, {Path: makeSource(t, ws, "ro", nil), Mode: modeRO}},
+		Options:  be.DefaultOptions(),
+		ReadOnly: true,
+	}
+	if err := be.Mount(context.Background(), spec); err != nil {
+		t.Fatalf("Mount: %v", err)
+	}
+	if err := be.Share(context.Background(), "vol-share-ro-2", target, view, true); err != nil {
+		t.Fatalf("Share: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(view, "x"), []byte("x"), 0o644); err == nil {
+		t.Error("write through a read-only view succeeded")
+	}
+}

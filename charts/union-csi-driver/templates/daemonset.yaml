@@ -65,6 +65,7 @@ spec:
             - --host-path-deny={{ join "," $hostDenied }}
             - --publish-timeout={{ .Values.publishTimeout }}
             - --max-source-volumes={{ .Values.maxSourceVolumes }}
+            - --reuse-mounts={{ .Values.reuseMounts }}
             - --denylist-mode={{ .Values.options.denylistMode }}
             {{- with .Values.options.allowlist }}
             - --option-allowlist={{ . }}

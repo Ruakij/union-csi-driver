@@ -21,6 +21,9 @@ type volumeState struct {
 	// Branches is set, on the host otherwise.
 	Argv     []string       `json:"argv"`
 	Branches []sandbox.Bind `json:"branches,omitempty"`
+	// SharedFrom marks Target as a bind of another volume's union, with no daemon of its own.
+	SharedFrom string `json:"sharedFrom,omitempty"`
+	ReadOnly   bool   `json:"readOnly,omitempty"`
 }
 
 func statePath(dir, volumeID string) string {

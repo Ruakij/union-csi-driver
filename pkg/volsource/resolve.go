@@ -63,6 +63,15 @@ func NewResolver(client kubernetes.Interface, kubeletRoot string, hostPaths Host
 
 // Resolve maps each requested pod volume name to its kubelet publish path.
 func (r *Resolver) Resolve(ctx context.Context, podNamespace, podName, podUID string, names []string) ([]SourcePath, error) {
+	pod, err := r.GetPod(ctx, podNamespace, podName, podUID)
+	if err != nil {
+		return nil, err
+	}
+	return r.ResolveIn(ctx, pod, names)
+}
+
+// GetPod refuses a pod recreated under the same name, by UID.
+func (r *Resolver) GetPod(ctx context.Context, podNamespace, podName, podUID string) (*corev1.Pod, error) {
 	pod, err := r.client.CoreV1().Pods(podNamespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -73,12 +82,17 @@ func (r *Resolver) Resolve(ctx context.Context, podNamespace, podName, podUID st
 	if string(pod.UID) != podUID {
 		return nil, fmt.Errorf("pod %s/%s UID %q does not match injected UID %q", podNamespace, podName, pod.UID, podUID)
 	}
+	return pod, nil
+}
 
+// ResolveIn is Resolve for a pod from GetPod.
+func (r *Resolver) ResolveIn(ctx context.Context, pod *corev1.Pod, names []string) ([]SourcePath, error) {
+	podUID := string(pod.UID)
 	byName := make(map[string]corev1.Volume, len(pod.Spec.Volumes))
 	for _, v := range pod.Spec.Volumes {
 		byName[v.Name] = v
 	}
-	referenced := referencedVolumes(pod)
+	referenced := ReferencedVolumes(pod)
 
 	podVolumesRoot := filepath.Join(r.kubeletRoot, "pods", podUID, "volumes")
 
@@ -112,9 +126,9 @@ func (r *Resolver) Resolve(ctx context.Context, podNamespace, podName, podUID st
 	return results, nil
 }
 
-// referencedVolumes collects the pod volume names some container mounts, using
+// ReferencedVolumes collects the pod volume names some container mounts, using
 // the same containers kubelet consults when deciding which volumes to set up.
-func referencedVolumes(pod *corev1.Pod) map[string]struct{} {
+func ReferencedVolumes(pod *corev1.Pod) map[string]struct{} {
 	refs := make(map[string]struct{}, len(pod.Spec.Volumes))
 	add := func(mounts []corev1.VolumeMount, devices []corev1.VolumeDevice) {
 		for _, m := range mounts {

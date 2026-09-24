@@ -65,6 +65,9 @@ hostPaths:
 
 publishTimeout: 30s
 maxSourceVolumes: 32
+# Mounts a union declared several times in one pod once, and binds that mount
+# for the other volumes. false gives each volume its own mount.
+reuseMounts: true
 
 options:
   allowlist: "" # empty: any schema-known option that is not denied

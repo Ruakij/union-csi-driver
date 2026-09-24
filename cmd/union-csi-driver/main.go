@@ -103,6 +103,7 @@ func main() {
 	flag.StringVar(&cfg.StateDir, "state-dir", "", "where the backend keeps per-volume node state (default: \"<kubelet-root>/plugins/<drivername>/state\")")
 	flag.DurationVar(&cfg.PublishTimeout, "publish-timeout", 30*time.Second, "how long NodePublishVolume waits for sibling volumes to become ready")
 	flag.IntVar(&cfg.MaxSourceVolumes, "max-source-volumes", 32, "maximum number of sourceVolumes entries accepted per volume")
+	flag.BoolVar(&cfg.ReuseMounts, "reuse-mounts", true, "mount a union once per pod when the pod declares it more than once, and bind that mount for the others")
 
 	flag.Var(csvFlag{&policyCfg.Allowlist}, "option-allowlist", "comma-separated list of allowed backend options (empty: any schema-known option not denied)")
 	flag.Var(csvFlag{&policyCfg.Denylist}, "option-denylist", "comma-separated list of denied backend options (empty: backend default)")

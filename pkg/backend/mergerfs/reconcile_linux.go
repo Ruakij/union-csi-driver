@@ -6,12 +6,15 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	systemd "github.com/coreos/go-systemd/v22/dbus"
 	"golang.org/x/sys/unix"
 	"k8s.io/klog/v2"
+
+	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
 
 // wakeReconcile cuts the wait for the next reconcile pass short. It holds at most
@@ -106,6 +109,8 @@ func reconcileOnce(ctx context.Context, stateDir string, logLive bool) {
 		return
 	}
 
+	// Shared views last, so they bind to unions this pass has just remounted.
+	sort.SliceStable(states, func(i, j int) bool { return states[i].SharedFrom == "" && states[j].SharedFrom != "" })
 	for _, st := range states {
 		reconcileVolume(ctx, stateDir, st, logLive)
 	}
@@ -146,6 +151,11 @@ func reconcileVolume(ctx context.Context, stateDir string, st volumeState, logLi
 		return
 	}
 
+	if st.SharedFrom != "" {
+		rebindShared(st)
+		return
+	}
+
 	klog.Warningf("mergerfs: %s is no longer a live mount, remounting", st.Target)
 	if err := fuseUnmount(st.Target); err != nil {
 		klog.Errorf("mergerfs: reconcile: %v", err)
@@ -156,6 +166,21 @@ func reconcileVolume(ctx context.Context, stateDir string, st volumeState, logLi
 	}
 	if err := startDaemon(ctx, st); err != nil {
 		klog.Errorf("mergerfs: reconcile: remount %s: %v", st.Target, err)
+	}
+}
+
+func rebindShared(st volumeState) {
+	if !serving(st.SharedFrom) {
+		klog.V(4).Infof("mergerfs: %s is shared from %s, which is not live yet", st.Target, st.SharedFrom)
+		return
+	}
+	klog.Warningf("mergerfs: %s is no longer a live mount, binding %s to it again", st.Target, st.SharedFrom)
+	if err := fuseUnmount(st.Target); err != nil {
+		klog.Errorf("mergerfs: reconcile: %v", err)
+		return
+	}
+	if err := backend.BindMount(st.SharedFrom, st.Target, st.ReadOnly); err != nil {
+		klog.Errorf("mergerfs: reconcile: rebind %s: %v", st.Target, err)
 	}
 }
 
