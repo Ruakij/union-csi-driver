@@ -1,11 +1,8 @@
 # union-csi-driver
 
-[![CI](https://github.com/Ruakij/union-csi-driver/actions/workflows/ci.yaml/badge.svg)](https://github.com/Ruakij/union-csi-driver/actions/workflows/ci.yaml)
-[![Version](https://img.shields.io/github/v/release/Ruakij/union-csi-driver?label=Version&color=green)](https://github.com/Ruakij/union-csi-driver/releases)
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-1.25%2B-blue)](charts/union-csi-driver/Chart.yaml)
-[![Backends](https://img.shields.io/badge/Backends-overlayfs%20%7C%20mergerfs-orange)](#backend-differences-that-show-up-in-the-manifest)
-[![Go](https://img.shields.io/github/go-mod/go-version/Ruakij/union-csi-driver?label=Go)](go.mod)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Helm](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fruakij.github.io%2Funion-csi-driver%2Findex.yaml&query=%24.entries%5B%27union-csi-driver%27%5D%5B0%5D.version&label=Helm&logo=helm&color=0F1689&prefix=v)](#install)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-1.25%2B-326CE5?logo=kubernetes&logoColor=white)](#requirements)
+[![Backends](https://img.shields.io/badge/Backends-overlayfs%20%7C%20mergerfs-orange)](#backend-differences)
 
 **An overlayfs and mergerfs CSI driver for Kubernetes.**
 
@@ -54,108 +51,20 @@ On top of what overlayfs and mergerfs do themselves:
 - **Node-only.** No controller, provisioner or attacher, just a DaemonSet with
   `node-driver-registrar` and `livenessprobe`.
 
-## Surviving restarts
+## Requirements
 
-Many FUSE-based CSI drivers run their FUSE daemons inside the driver pod. Restarting,
-upgrading or evicting that pod kills every daemon on the node, and every workload using
-those mounts is left with `Transport endpoint is not connected` until it is recreated.
-The usual workaround is a separate service installed on the host, such as
-[blob-csi-driver's blobfuse-proxy](https://github.com/kubernetes-sigs/blob-csi-driver/tree/master/deploy/blobfuse-proxy).
-
-Here, nothing has to be installed on the node. Union volumes stay up across a driver
-restart, upgrade or eviction:
-
-| Backend                   | Driver pod restarts                                                          | Daemon crash or OOM kill                                         |
-| ------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| overlay                   | Unaffected: a kernel mount with no process behind it.                        | No daemon.                                                       |
-| mergerfs, host systemd    | Unaffected: the daemon belongs to host systemd, not the driver pod.          | Remounted within a second; open file descriptors see `ENOTCONN`. |
-| mergerfs, no host systemd | Remounted once the driver pod is back; open file descriptors see `ENOTCONN`. | Remounted within a second; open file descriptors see `ENOTCONN`. |
-
-- **overlay** mounts are created in the host's mount namespace through the
-  `Bidirectional` kubelet pods mount, so they live on regardless of the driver pod.
-- **mergerfs with host systemd** (the default wherever `/run/systemd` exists): each
-  daemon runs from the driver image in its own session and is then adopted into a
-  transient host systemd scope, `union-csi-<volumeID>.scope`, the same mechanism as
-  `systemd-run --scope` and kubelet's own mount helpers. From then on the daemon belongs
-  to host systemd, not the driver pod's cgroup. The scope name is derived from the
-  volume ID, so a restarted driver still finds and stops it on unmount.
-- **mergerfs without systemd** (Talos, other non-systemd nodes, or
-  `mergerfs.daemonLifetime=in-container`): daemons die with the driver pod and are
-  remounted as below. Both the driver log and the chart's install notes warn about this
-  mode.
-
-Each mergerfs daemon's target and exact argv are recorded in
-`<kubeletRoot>/plugins/<driverName>/state/<volumeID>.json` before it starts. On startup
-and as soon as a daemon exits, the driver remounts every mount whose daemon died, and
-drops records of targets kubelet has removed. It learns of exits from its own child
-processes and, with host systemd, from the daemon's scope stopping, which also covers
-daemons started by an earlier driver pod. A pass every 30s catches anything missed. The
-mount comes back at the same path, but file descriptors opened before it died keep
-returning `ENOTCONN` until the workload reopens them.
-
-Surviving daemons are never restarted for an upgrade, since that would break their
-open file descriptors: they keep the previous mergerfs version until their pod is
-recreated.
-
-With `mergerfs.daemonLifetime=systemd`, the driver pod does not start at all on nodes
-without systemd, instead of silently falling back.
-
-While no driver pod is running, for example mid-rollout, new pods with a union volume
-wait in `ContainerCreating` with a `FailedMount` event and start once it is back.
-Running pods are unaffected.
-
-## How it works
-
-Only CSI ephemeral inline volumes are supported. For each union volume, kubelet calls
-`NodePublishVolume`, which:
-
-1. Parses `volumeAttributes` against a fixed grammar and rejects unknown keys.
-2. Resolves backend options through the admin policy: defaults, then pod options, then
-   forced options.
-3. Reads the pod from the API server, checks its UID against the one kubelet injected,
-   and maps each named volume to its kubelet publish path under
-   `<kubeletRoot>/pods/<podUID>/volumes/`. PVCs are followed to their PV name, since
-   kubelet names their directories that way. Generic ephemeral volumes are followed
-   through their `<pod>-<volume>` claim, which must be owned by the pod. hostPath
-   volumes and PVs must lie in one of the `hostPaths.allowed` directories and outside
-   `hostPaths.denied`, checked again after resolving symlinks; they are looked up
-   where the chart mounts those directories, under `/host`. Every resolved path must
-   stay inside its root.
-4. Waits up to `publishTimeout` for each source: a real mountpoint for CSI, `local` and
-   network volumes, an existing directory for the rest. On timeout it returns a
-   retryable error and kubelet tries again later.
-5. Mounts the union at the target path:
-   - **overlay**: a kernel overlay mount through the `fsopen`/`fsconfig` API where
-     available (one argument per layer, no option-length limit), otherwise classic
-     `mount(2)`. A single source becomes a bind mount. Every layer is opened
-     without following symlinks and handed to the kernel by file descriptor, so
-     what gets mounted is the directory that was checked.
-   - **mergerfs**: starts the `mergerfs` daemon without a shell, in a sandbox
-     (`mergerfs.sandbox`): new namespaces whose read-only tmpfs root holds only the
-     branches at `/branch/<n>`, the target at `/union`, `/dev/fuse`, `/dev/null`,
-     the binary and `/proc/self/fd`, with no network and only the capabilities for
-     mounting and handling files. `RO` branches, and all of them for a `readOnly`
-     volume, are bound read-only. Only the mount on `/union` propagates out to the
-     target. Once the target is a live FUSE mount, the driver bind-mounts its
-     `.mergerfs` control file read-only over itself (`mergerfs.sealControlFile`).
-     mergerfs otherwise lets anyone who can write that file reconfigure the running
-     union through xattrs, reordering or dropping branches or changing policies, and
-     root in every consumer container can.
-
-A pod may declare the same union more than once, for example to mount it into
-containers under different volume names. With `reuseMounts` (the default),
-the first such volume in the pod spec that a container mounts sets up the union, and
-the others wait for it and bind its mount, so they share one overlay mount or one
-mergerfs daemon. Volumes are the same union when their `sourceVolumes`, `options` and
-`readOnly` match exactly. Overlay needs this for a union with an `RW` branch: two
-overlay mounts would share its upper and work directories. The kernel does not allow
-that, and either fails the second mount with `EBUSY` or leaves file access through
-both undefined. For mergerfs, a shared view is bound again once a crashed daemon is
-remounted. Unions of different pods are never shared.
-
-A target that is already mounted counts as published, so kubelet's repeated calls,
-including those after a driver restart, are no-ops. `NodeUnpublishVolume` unmounts the
-union, cleans up, and succeeds if the volume is already gone.
+- Kubernetes 1.25 or newer. Mounting unmounted source volumes automatically
+  (`autoMountSources`) needs `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy,
+  served from Kubernetes 1.37.
+- Linux 5.12 or newer for mergerfs with its sandbox, the default. The driver refuses to
+  start on an older kernel unless `mergerfs.sandbox` is `false`. overlay has no such
+  minimum.
+- The `fuse` kernel module on the nodes for mergerfs.
+- Host systemd on the nodes for mergerfs mounts to survive driver restarts. Optional,
+  see [Surviving restarts](#surviving-restarts).
+- On k3s, RKE2 or MicroK8s, `kubeletRootDir` set to the node's real kubelet directory.
+- A namespace that admits privileged pods, with host PID when mergerfs uses host
+  systemd.
 
 ## Install
 
@@ -183,12 +92,8 @@ Or from a checkout, to run an unreleased revision:
 helm install mergerfs-csi charts/union-csi-driver --set backend=mergerfs
 ```
 
-The mergerfs sandbox needs Linux 5.12 or newer, and the driver refuses to start on
-an older kernel unless `mergerfs.sandbox` is `false`.
-
 The driver name defaults to `<backend>.csi.ruekov.eu`, and that is what pods put in
-`volumes[].csi.driver`. If the cluster is k3s, RKE2 or MicroK8s, set `kubeletRootDir`
-to the node's real kubelet directory.
+`volumes[].csi.driver`.
 
 ## Use
 
@@ -227,7 +132,7 @@ suffix says whether writes may land there: `RW`, `RO`, or (mergerfs only) `NC`. 
 name is `RW`. Setting `readOnly: true` on the CSI volume makes the whole merge
 read-only regardless.
 
-### Backend differences that show up in the manifest
+### Backend differences
 
 - **mergerfs** resolves every lookup across branches at request time, so branches may be
   edited out-of-band while mounted. Any number of branches may be `RW`. It has no
@@ -353,6 +258,109 @@ process. These are always computed on the node.
 Admin `defaults` and `forced` values bypass the allowlist and denylist but are checked
 against the backend's option schema at startup, so a typo stops the DaemonSet instead of
 failing every mount.
+
+## How it works
+
+Only CSI ephemeral inline volumes are supported. For each union volume, kubelet calls
+`NodePublishVolume`, which:
+
+1. Parses `volumeAttributes` against a fixed grammar and rejects unknown keys.
+2. Resolves backend options through the admin policy: defaults, then pod options, then
+   forced options.
+3. Reads the pod from the API server, checks its UID against the one kubelet injected,
+   and maps each named volume to its kubelet publish path under
+   `<kubeletRoot>/pods/<podUID>/volumes/`. PVCs are followed to their PV name, since
+   kubelet names their directories that way. Generic ephemeral volumes are followed
+   through their `<pod>-<volume>` claim, which must be owned by the pod. hostPath
+   volumes and PVs must lie in one of the `hostPaths.allowed` directories and outside
+   `hostPaths.denied`, checked again after resolving symlinks; they are looked up
+   where the chart mounts those directories, under `/host`. Every resolved path must
+   stay inside its root.
+4. Waits up to `publishTimeout` for each source: a real mountpoint for CSI, `local` and
+   network volumes, an existing directory for the rest. On timeout it returns a
+   retryable error and kubelet tries again later.
+5. Mounts the union at the target path:
+   - **overlay**: a kernel overlay mount through the `fsopen`/`fsconfig` API where
+     available (one argument per layer, no option-length limit), otherwise classic
+     `mount(2)`. A single source becomes a bind mount. Every layer is opened
+     without following symlinks and handed to the kernel by file descriptor, so
+     what gets mounted is the directory that was checked.
+   - **mergerfs**: starts the `mergerfs` daemon without a shell, in a sandbox
+     (`mergerfs.sandbox`): new namespaces whose read-only tmpfs root holds only the
+     branches at `/branch/<n>`, the target at `/union`, `/dev/fuse`, `/dev/null`,
+     the binary and `/proc/self/fd`, with no network and only the capabilities for
+     mounting and handling files. `RO` branches, and all of them for a `readOnly`
+     volume, are bound read-only. Only the mount on `/union` propagates out to the
+     target. Once the target is a live FUSE mount, the driver bind-mounts its
+     `.mergerfs` control file read-only over itself (`mergerfs.sealControlFile`).
+     mergerfs otherwise lets anyone who can write that file reconfigure the running
+     union through xattrs, reordering or dropping branches or changing policies, and
+     root in every consumer container can.
+
+A pod may declare the same union more than once, for example to mount it into
+containers under different volume names. With `reuseMounts` (the default),
+the first such volume in the pod spec that a container mounts sets up the union, and
+the others wait for it and bind its mount, so they share one overlay mount or one
+mergerfs daemon. Volumes are the same union when their `sourceVolumes`, `options` and
+`readOnly` match exactly. Overlay needs this for a union with an `RW` branch: two
+overlay mounts would share its upper and work directories. The kernel does not allow
+that, and either fails the second mount with `EBUSY` or leaves file access through
+both undefined. For mergerfs, a shared view is bound again once a crashed daemon is
+remounted. Unions of different pods are never shared.
+
+A target that is already mounted counts as published, so kubelet's repeated calls,
+including those after a driver restart, are no-ops. `NodeUnpublishVolume` unmounts the
+union, cleans up, and succeeds if the volume is already gone.
+
+### Surviving restarts
+
+Many FUSE-based CSI drivers run their FUSE daemons inside the driver pod. Restarting,
+upgrading or evicting that pod kills every daemon on the node, and every workload using
+those mounts is left with `Transport endpoint is not connected` until it is recreated.
+The usual workaround is a separate service installed on the host, such as
+[blob-csi-driver's blobfuse-proxy](https://github.com/kubernetes-sigs/blob-csi-driver/tree/master/deploy/blobfuse-proxy).
+
+Here, nothing has to be installed on the node. Union volumes stay up across a driver
+restart, upgrade or eviction:
+
+| Backend                   | Driver pod restarts                                                          | Daemon crash or OOM kill                                         |
+| ------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| overlay                   | Unaffected: a kernel mount with no process behind it.                        | No daemon.                                                       |
+| mergerfs, host systemd    | Unaffected: the daemon belongs to host systemd, not the driver pod.          | Remounted within a second; open file descriptors see `ENOTCONN`. |
+| mergerfs, no host systemd | Remounted once the driver pod is back; open file descriptors see `ENOTCONN`. | Remounted within a second; open file descriptors see `ENOTCONN`. |
+
+- **overlay** mounts are created in the host's mount namespace through the
+  `Bidirectional` kubelet pods mount, so they live on regardless of the driver pod.
+- **mergerfs with host systemd** (the default wherever `/run/systemd` exists): each
+  daemon runs from the driver image in its own session and is then adopted into a
+  transient host systemd scope, `union-csi-<volumeID>.scope`, the same mechanism as
+  `systemd-run --scope` and kubelet's own mount helpers. From then on the daemon belongs
+  to host systemd, not the driver pod's cgroup. The scope name is derived from the
+  volume ID, so a restarted driver still finds and stops it on unmount.
+- **mergerfs without systemd** (Talos, other non-systemd nodes, or
+  `mergerfs.daemonLifetime=in-container`): daemons die with the driver pod and are
+  remounted as below. Both the driver log and the chart's install notes warn about this
+  mode.
+
+Each mergerfs daemon's target and exact argv are recorded in
+`<kubeletRoot>/plugins/<driverName>/state/<volumeID>.json` before it starts. On startup
+and as soon as a daemon exits, the driver remounts every mount whose daemon died, and
+drops records of targets kubelet has removed. It learns of exits from its own child
+processes and, with host systemd, from the daemon's scope stopping, which also covers
+daemons started by an earlier driver pod. A pass every 30s catches anything missed. The
+mount comes back at the same path, but file descriptors opened before it died keep
+returning `ENOTCONN` until the workload reopens them.
+
+Surviving daemons are never restarted for an upgrade, since that would break their
+open file descriptors: they keep the previous mergerfs version until their pod is
+recreated.
+
+With `mergerfs.daemonLifetime=systemd`, the driver pod does not start at all on nodes
+without systemd, instead of silently falling back.
+
+While no driver pod is running, for example mid-rollout, new pods with a union volume
+wait in `ContainerCreating` with a `FailedMount` event and start once it is back.
+Running pods are unaffected.
 
 ## Build
 
