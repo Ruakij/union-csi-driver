@@ -3,7 +3,8 @@
 {{- $name := include "union-csi-driver.fullname" . -}}
 # Kubelet only sets up volumes some container mounts, so a source volume nothing
 # mounts would never appear. Mount each such source read-only into the first
-# container.
+# container mounting a union built from it, init containers only if no other does.
+# Unions no container mounts are never published, so their sources are left alone.
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicy
 metadata:
@@ -22,12 +23,23 @@ spec:
       expression: >-
         has(object.spec.volumes) && object.spec.volumes.exists(v, has(v.csi) && v.csi.driver == {{ $driver }})
   variables:
-    - name: wanted
+    - name: unions
       expression: >-
-        object.spec.volumes
-          .filter(v, has(v.csi) && v.csi.driver == {{ $driver }} && has(v.csi.volumeAttributes) && "sourceVolumes" in v.csi.volumeAttributes)
-          .map(v, v.csi.volumeAttributes["sourceVolumes"].split(",").map(e, e.split("=")[0].trim()))
-          .flatten().distinct()
+        object.spec.volumes.filter(v, has(v.csi) && v.csi.driver == {{ $driver }} &&
+          has(v.csi.volumeAttributes) && "sourceVolumes" in v.csi.volumeAttributes)
+    # Per container, the sources of the unions it mounts.
+    - name: containerSources
+      expression: >-
+        object.spec.containers.map(c, has(c.volumeMounts)
+          ? variables.unions.filter(u, c.volumeMounts.exists(m, m.name == u.name))
+              .map(u, u.csi.volumeAttributes["sourceVolumes"].split(",").map(e, e.split("=")[0].trim())).flatten()
+          : [])
+    - name: initContainerSources
+      expression: >-
+        has(object.spec.initContainers) ? object.spec.initContainers.map(c, has(c.volumeMounts)
+          ? variables.unions.filter(u, c.volumeMounts.exists(m, m.name == u.name))
+              .map(u, u.csi.volumeAttributes["sourceVolumes"].split(",").map(e, e.split("=")[0].trim())).flatten()
+          : []) : []
     - name: mounted
       expression: >-
         object.spec.containers.map(c, has(c.volumeMounts) ? c.volumeMounts.map(m, m.name) : []).flatten() +
@@ -35,17 +47,18 @@ spec:
     # Names that are not pod volumes are left to the driver, which reports them.
     - name: missing
       expression: >-
-        variables.wanted.filter(n, !(n in variables.mounted) && object.spec.volumes.exists(v, v.name == n))
+        (variables.containerSources + variables.initContainerSources).flatten().distinct()
+          .filter(n, !(n in variables.mounted) && object.spec.volumes.exists(v, v.name == n))
+  # The target mounts a union, so its volumeMounts exists and can be appended to.
   mutations:
     - patchType: JSONPatch
       jsonPatch:
         expression: >-
-          variables.missing.size() == 0 ? [] :
-          has(object.spec.containers[0].volumeMounts)
-            ? variables.missing.map(n, JSONPatch{op: "add", path: "/spec/containers/0/volumeMounts/-",
-                value: Object.spec.containers.volumeMounts{name: n, mountPath: "/.union-csi/sources/" + n, readOnly: true}})
-            : [JSONPatch{op: "add", path: "/spec/containers/0/volumeMounts",
-                value: variables.missing.map(n, Object.spec.containers.volumeMounts{name: n, mountPath: "/.union-csi/sources/" + n, readOnly: true})}]
+          variables.missing.map(n, JSONPatch{op: "add",
+            path: variables.containerSources.exists(s, n in s)
+              ? "/spec/containers/" + string(variables.containerSources.indexOf(variables.containerSources.filter(s, n in s)[0])) + "/volumeMounts/-"
+              : "/spec/initContainers/" + string(variables.initContainerSources.indexOf(variables.initContainerSources.filter(s, n in s)[0])) + "/volumeMounts/-",
+            value: Object.spec.containers.volumeMounts{name: n, mountPath: "/.union-csi/sources/" + n, readOnly: true}})
   reinvocationPolicy: Never
 ---
 apiVersion: admissionregistration.k8s.io/v1

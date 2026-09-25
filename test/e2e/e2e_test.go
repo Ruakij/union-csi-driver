@@ -209,8 +209,16 @@ func testBackend(t *testing.T, b string) {
 		p := pod(auto, emptyDir("rw"), claim("top"), union("merged", driver, "rw,top=RO", false, ""))
 		c := &p.Spec.Containers[0]
 		c.VolumeMounts = slices.DeleteFunc(c.VolumeMounts, func(m corev1.VolumeMount) bool { return m.Name != "merged" })
-		create(t, p)
+		// Sources go to the container mounting the union, not the first one.
+		side := corev1.Container{Name: "side", Image: busybox, Command: []string{"sleep", "infinity"}}
+		p.Spec.Containers = append([]corev1.Container{side}, p.Spec.Containers...)
+		p = create(t, p)
 		t.Cleanup(func() { _ = deletePods(context.Background(), auto) })
+		for _, m := range p.Spec.Containers[0].VolumeMounts {
+			if strings.HasPrefix(m.MountPath, "/.union-csi/") {
+				t.Fatalf("side container got source mount %v", m)
+			}
+		}
 		ready(t, auto)
 		expect(t, auto, "cat /merged/shared /.union-csi/sources/top/a", "top\na")
 		// The injected mounts are read-only in the container only; the union still writes.

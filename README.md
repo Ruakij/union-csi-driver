@@ -118,9 +118,11 @@ volumes:
 Source volumes may be mounted into containers or left out:
 
 - **Mounted** by any container: used as they are.
-- **Not mounted**: a read-only mount at `/.union-csi/sources/<volume>` is added to the
-  first container at pod creation, since kubelet only sets up volumes some container
-  mounts.
+- **Not mounted**: a read-only mount at `/.union-csi/sources/<volume>` is added at pod
+  creation to the first container mounting a union built from it,
+  since kubelet only sets up volumes some container mounts.
+  One such mount is enough: kubelet sets up all of a pod's volumes before any
+  of its containers start.
 
 The automatic mount comes from a MutatingAdmissionPolicy the chart installs on clusters
 serving it as `admissionregistration.k8s.io/v1`. `autoMountSources: false` turns it
@@ -243,7 +245,7 @@ process. These are always computed on the node.
 | `mergerfs.daemonLifetime`     | `auto`                                                          | `auto` uses host systemd where present, `systemd` requires it, `in-container` never uses it.         |
 | `mergerfs.sandbox`            | `true`                                                          | Run each mergerfs daemon in a root holding only its branches and target. Needs Linux 5.12+.          |
 | `mergerfs.sealControlFile`    | `true`                                                          | Make each union's `.mergerfs` control file read-only, so consumers cannot reconfigure the union.     |
-| `autoMountSources`            | `true`                                                          | Mount unmounted source volumes into the first container at admission (MutatingAdmissionPolicy).      |
+| `autoMountSources`            | `true`                                                          | Mount unmounted source volumes into the first container mounting their union at admission (MutatingAdmissionPolicy). |
 | `logLevel`                    | `2`                                                             | klog verbosity of both containers.                                                                   |
 | `rbac.create`                 | `true`                                                          | Create the ClusterRole and binding.                                                                  |
 | `serviceAccount.create`       | `true`                                                          | Create the ServiceAccount.                                                                           |
