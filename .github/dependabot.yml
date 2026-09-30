@@ -12,6 +12,10 @@ updates:
         patterns: ["*"]
         exclude-patterns: ["k8s.io/*", "sigs.k8s.io/*"]
         update-types: [minor, patch]
+    ignore:
+      # GO-2026-6443 (server panic on missing authority), fixed after v1.84.0.
+      - dependency-name: google.golang.org/grpc
+        versions: ["1.84.x"]
 
   - package-ecosystem: github-actions
     directory: /
