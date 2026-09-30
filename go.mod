@@ -12,7 +12,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.33.0
 	github.com/onsi/gomega v1.44.0
 	golang.org/x/sys v0.48.0
-	google.golang.org/grpc v1.84.0
+	google.golang.org/grpc v1.83.2
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.1
 	k8s.io/client-go v1.5.2
