@@ -21,9 +21,41 @@ type volumeState struct {
 	// Branches is set, on the host otherwise.
 	Argv     []string       `json:"argv"`
 	Branches []sandbox.Bind `json:"branches,omitempty"`
+	// BranchPaths are the branches as they are on the host, SandboxBranches the same
+	// branches as the daemon sees them. The reconcile loop compares the two views to
+	// find a branch the daemon lost.
+	BranchPaths     []string `json:"branchPaths,omitempty"`
+	SandboxBranches []string `json:"sandboxBranches,omitempty"`
 	// SharedFrom marks Target as a bind of another volume's union, with no daemon of its own.
 	SharedFrom string `json:"sharedFrom,omitempty"`
 	ReadOnly   bool   `json:"readOnly,omitempty"`
+}
+
+// branchPaths returns the branches as they are on the host. In a state file that
+// carries only the binds, every bind's host path is a branch of its own.
+func (st volumeState) branchPaths() []string {
+	if st.BranchPaths != nil {
+		return st.BranchPaths
+	}
+	paths := make([]string, 0, len(st.Branches))
+	for _, b := range st.Branches {
+		paths = append(paths, b.Host)
+	}
+	return paths
+}
+
+// sandboxBranchPaths returns the branches as the sandboxed daemon sees them, and
+// nothing for a daemon that runs without a sandbox. In a state file that carries
+// only the binds, every bind's sandbox path is a branch of its own.
+func (st volumeState) sandboxBranchPaths() []string {
+	if st.SandboxBranches != nil {
+		return st.SandboxBranches
+	}
+	paths := make([]string, 0, len(st.Branches))
+	for _, b := range st.Branches {
+		paths = append(paths, b.Sandbox)
+	}
+	return paths
 }
 
 func statePath(dir, volumeID string) string {

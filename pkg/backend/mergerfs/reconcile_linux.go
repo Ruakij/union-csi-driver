@@ -128,6 +128,13 @@ func reconcileVolume(ctx context.Context, stateDir string, st volumeState, logLi
 		if logLive {
 			klog.Infof("mergerfs: found live mount %s", st.Target)
 		}
+		// mergerfs skips a branch it cannot reach without an error anywhere: the union
+		// keeps answering, with that branch's files simply absent. Only the branches as
+		// the daemon has them say so.
+		if stale := staleBranch(st); stale != "" {
+			klog.Warningf("mergerfs: remounting %s to pick up branch %s again", st.Target, stale)
+			remountUnion(ctx, st)
+		}
 		return
 	}
 
@@ -156,7 +163,11 @@ func reconcileVolume(ctx context.Context, stateDir string, st volumeState, logLi
 		return
 	}
 
-	klog.Warningf("mergerfs: %s is no longer a live mount, remounting", st.Target)
+	klog.Warningf("mergerfs: %s is not a live mount, remounting", st.Target)
+	remountUnion(ctx, st)
+}
+
+func remountUnion(ctx context.Context, st volumeState) {
 	if err := fuseUnmount(st.Target); err != nil {
 		klog.Errorf("mergerfs: reconcile: %v", err)
 		return

@@ -12,8 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -461,6 +463,119 @@ func TestReconcileRemountsADeadMount(t *testing.T) {
 		t.Fatal("target was not remounted by reconcileOnce")
 	}
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
+}
+
+// The incident this probe exists for: the source's FUSE daemon died and was
+// replaced at the same host path, so the host is healthy and only the daemon's own
+// clone of the branch is a dead superblock, which mergerfs skips without a word.
+func TestReconcileRemountsForAStaleBranch(t *testing.T) {
+	root := sharedDir(t)
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	killFirst := fuseSource(t, src, makeSource(t, root, "first", map[string]string{"first.txt": "from-first"}))
+	target := mountSources(t, root, "vol-stale-branch", nil, src)
+	stateDir := filepath.Join(root, "state")
+	before := daemonPIDs(t, target)
+	wantContent(t, filepath.Join(target, "first.txt"), "from-first")
+
+	// What csi-mount-healer does: the dead mount goes, a fresh daemon takes the path.
+	killFirst()
+	if err := unix.Unmount(src, unix.MNT_DETACH); err != nil {
+		t.Fatal(err)
+	}
+	fuseSource(t, src, makeSource(t, root, "second", map[string]string{"second.txt": "from-second"}))
+	if err := unix.Statfs(src, &unix.Statfs_t{}); err != nil {
+		t.Fatalf("statfs %s = %v, want the healthy replacement", src, err)
+	}
+	// Neither the union nor the host says anything is wrong, which is what makes the
+	// daemon's own view the only place to look.
+	if !isFUSEMount(target) {
+		t.Fatal("the union died with its branch")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	reconcileOnce(ctx, stateDir, false)
+
+	if got := daemonPIDs(t, target); reflect.DeepEqual(got, before) {
+		t.Fatalf("daemons = %v, unchanged: the stale branch did not get the union remounted", got)
+	}
+	wantContent(t, filepath.Join(target, "second.txt"), "from-second")
+}
+
+// A branch that is dead on the host too cannot be repaired by a remount, so the
+// union is left serving what it still has rather than being disrupted every pass.
+func TestReconcileLeavesAHostDeadBranchAlone(t *testing.T) {
+	root := sharedDir(t)
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	kill := fuseSource(t, src, makeSource(t, root, "first", map[string]string{"first.txt": "from-first"}))
+	target := mountSources(t, root, "vol-host-dead-branch", nil, src)
+	stateDir := filepath.Join(root, "state")
+	before := daemonPIDs(t, target)
+
+	kill()
+	if err := unix.Statfs(src, &unix.Statfs_t{}); !errors.Is(err, unix.ENOTCONN) {
+		t.Fatalf("statfs %s = %v, want ENOTCONN", src, err)
+	}
+
+	reconcileOnce(context.Background(), stateDir, false)
+
+	if got := daemonPIDs(t, target); !reflect.DeepEqual(got, before) {
+		t.Errorf("daemons = %v, want the unchanged %v: a remount cannot repair a branch that is dead on the host", got, before)
+	}
+}
+
+// A healthy branch must not get the union remounted every pass.
+func TestReconcileLeavesALiveBranchAlone(t *testing.T) {
+	target, stateDir, _, _ := newMount(t, "vol-live-branch")
+	before := daemonPIDs(t, target)
+
+	reconcileOnce(context.Background(), stateDir, false)
+
+	if got := daemonPIDs(t, target); !reflect.DeepEqual(got, before) {
+		t.Errorf("daemons = %v, want the unchanged %v", got, before)
+	}
+}
+
+// fuseSource mounts a mergerfs of its own at dir, standing in for a source volume
+// served by a FUSE daemon, and returns a function that kills that daemon and leaves
+// the mount behind dead.
+func fuseSource(t *testing.T, dir, backing string) func() {
+	t.Helper()
+	bin, err := exec.LookPath(mergerfsBinary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, "-f", "-o", "allow_other", backing+"=RW", dir)
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Reaped, not merely signalled: a zombie still holds the /dev/fuse connection.
+	var once sync.Once
+	kill := func() {
+		once.Do(func() {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		})
+	}
+	t.Cleanup(func() {
+		_ = unix.Unmount(dir, unix.MNT_DETACH)
+		kill()
+	})
+	deadline := time.Now().Add(30 * time.Second)
+	for !isFUSEMount(dir) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not become a FUSE mount", dir)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return kill
 }
 
 func waitRemounted(t *testing.T, target string) {

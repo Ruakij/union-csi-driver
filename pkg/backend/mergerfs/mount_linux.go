@@ -48,8 +48,15 @@ func checkSandbox() error {
 
 func mountUnion(ctx context.Context, spec backend.MountSpec, stateDir string) error {
 	st := volumeState{VolumeID: spec.VolumeID, Target: spec.Target}
+	// Taken before the sandbox rewrites the sources to its own paths.
+	for _, s := range spec.Sources {
+		st.BranchPaths = append(st.BranchPaths, s.Path)
+	}
 	if useSandbox {
 		spec, st.Branches = sandboxed(spec)
+		for _, s := range spec.Sources {
+			st.SandboxBranches = append(st.SandboxBranches, s.Path)
+		}
 	}
 	var err error
 	if st.Argv, err = buildArgv(spec); err != nil {
@@ -144,6 +151,8 @@ func startDaemon(ctx context.Context, st volumeState) error {
 			return err
 		}
 	}
+	// The branch probe reaches a daemon's mount namespace through its pid.
+	daemonPIDByVolume.Store(volumeID, cmd.Process.Pid)
 	klog.V(4).Infof("mergerfs: mounted %s (pid %d)", target, cmd.Process.Pid)
 	// Deliberately not bound to ctx, which belongs to the publish request: the
 	// daemon outlives it, and so must the watch on its exit.
@@ -197,6 +206,7 @@ func unmountUnion(ctx context.Context, volumeID, target, stateDir string) error 
 	if err := fuseUnmount(target); err != nil {
 		return err
 	}
+	daemonPIDByVolume.Delete(volumeID)
 	if systemdAvailable() {
 		stopScope(ctx, scopeUnitName(volumeID))
 	}
