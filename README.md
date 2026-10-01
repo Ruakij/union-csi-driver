@@ -194,6 +194,13 @@ reach the whole node, so the option is refused there. `symlinkify` and the absol
 of `link-exdev` and `rename-exdev` are left out, as the links they create point at paths
 only the daemon sees. `rename-exdev=rel-symlink` fails with `ENOENT` in mergerfs itself.
 
+With `follow-symlinks` set, a symlink on a branch that points at the union's own
+mountpoint wedges the daemon for good: resolving it re-enters the mount the daemon
+is serving, and the request waits on itself. Every later access to the union hangs,
+and killing the reader does not recover it; only a remount does. Any writer to an
+`RW` branch can plant such a link, so the option suits branches whose contents are
+trusted. `never`, the default, has no such path.
+
 #### overlay:
 
 | Option                | Values                      | Default    | Description                                                                        |
