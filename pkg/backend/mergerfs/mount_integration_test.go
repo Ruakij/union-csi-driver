@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Ruakij/fuse-sandbox/pkg/sandbox"
+	"github.com/Ruakij/go-csi-fuse-supervisor/pkg/fusemount"
 	"golang.org/x/sys/unix"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
@@ -28,45 +29,6 @@ import (
 func TestMain(m *testing.M) {
 	sandbox.Init()
 	os.Exit(m.Run())
-}
-
-// Runs before any test here mounts, so no earlier scope's exit can pose as the wake.
-func TestWatchScopesWakesOnScopeStop(t *testing.T) {
-	if !systemdAvailable() {
-		if os.Getenv("MOUNTTEST_SYSTEMD") != "" {
-			t.Fatal("MOUNTTEST_SYSTEMD is set but host systemd is unreachable")
-		}
-		t.Skip("no host systemd; see make test-mount-systemd")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-
-	cmd := exec.Command("sleep", "60")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	if err := adoptIntoScope(ctx, scopeUnitName("vol-watch"), cmd.Process.Pid); err != nil {
-		_ = cmd.Process.Kill()
-		t.Fatal(err)
-	}
-
-	woken := make(chan struct{}, 1)
-	if err := watchScopes(ctx, func() {
-		select {
-		case woken <- struct{}{}:
-		default:
-		}
-	}); err != nil {
-		t.Fatal(err)
-	}
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
-
-	select {
-	case <-woken:
-	case <-time.After(10 * time.Second):
-		t.Fatal("no wake after the scope's process died")
-	}
 }
 
 func makeSource(t *testing.T, root, name string, files map[string]string) string {
@@ -109,8 +71,8 @@ func sharedDir(t *testing.T) string {
 	return root
 }
 
-// newMount publishes a two-branch merge and returns its target and state dir.
-func newMount(t *testing.T, volumeID string) (target, stateDir, rw, ro string) {
+// newMount publishes a two-branch merge and returns its backend and target.
+func newMount(t *testing.T, volumeID string) (be *mergerfsBackend, target, rw, ro string) {
 	t.Helper()
 	root := sharedDir(t)
 	rw = makeSource(t, root, "rw", map[string]string{"rw.txt": "from-rw"})
@@ -119,9 +81,9 @@ func newMount(t *testing.T, volumeID string) (target, stateDir, rw, ro string) {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	stateDir = filepath.Join(root, "state")
+	stateDir := filepath.Join(root, "state")
 
-	be := &mergerfsBackend{}
+	be = &mergerfsBackend{}
 	if err := be.Init(stateDir); err != nil {
 		t.Fatal(err)
 	}
@@ -138,14 +100,14 @@ func newMount(t *testing.T, volumeID string) (target, stateDir, rw, ro string) {
 	if err := be.Mount(ctx, spec); err != nil {
 		t.Fatalf("Mount: %v", err)
 	}
-	if !isFUSEMount(target) {
+	if !fusemount.IsFUSE(target) {
 		t.Fatalf("%s is not a FUSE mount after Mount", target)
 	}
-	return target, stateDir, rw, ro
+	return be, target, rw, ro
 }
 
 func TestMountMergesBranches(t *testing.T) {
-	target, _, rw, ro := newMount(t, "vol-merge")
+	_, target, rw, ro := newMount(t, "vol-merge")
 
 	wantContent(t, filepath.Join(target, "rw.txt"), "from-rw")
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
@@ -242,7 +204,7 @@ func TestSandboxKeepsInheritedFilesOut(t *testing.T) {
 	if err := os.Symlink(fmt.Sprintf("/proc/self/fd/%d/key", fd), filepath.Join(src, "leak")); err != nil {
 		t.Fatal(err)
 	}
-	target := mountSources(t, root, "vol-inherit", map[string]string{"follow-symlinks": "all"}, src)
+	_, target := mountSources(t, root, "vol-inherit", map[string]string{"follow-symlinks": "all"}, src)
 
 	// Not followed by the daemon, the link comes back as is, and the test's own fd
 	// would resolve it.
@@ -270,7 +232,7 @@ func TestSealIgnoresPlantedControlFile(t *testing.T) {
 			if err := plant(filepath.Join(src, controlFile), decoy); err != nil {
 				t.Fatal(err)
 			}
-			target := mountSources(t, root, "vol-plant-"+name, nil, src)
+			_, target := mountSources(t, root, "vol-plant-"+name, nil, src)
 
 			if sealed(decoy) {
 				t.Error("sealed the planted link's destination")
@@ -283,8 +245,8 @@ func TestSealIgnoresPlantedControlFile(t *testing.T) {
 	}
 }
 
-// mountSources publishes a merge of RW sources under root and returns its target.
-func mountSources(t *testing.T, root, volumeID string, options map[string]string, sources ...string) string {
+// mountSources publishes a merge of RW sources under root and returns its backend and target.
+func mountSources(t *testing.T, root, volumeID string, options map[string]string, sources ...string) (*mergerfsBackend, string) {
 	t.Helper()
 	target := filepath.Join(root, "target")
 	if err := os.Mkdir(target, 0o755); err != nil {
@@ -302,13 +264,13 @@ func mountSources(t *testing.T, root, volumeID string, options map[string]string
 	if err := be.Mount(context.Background(), spec); err != nil {
 		t.Fatalf("Mount: %v", err)
 	}
-	return target
+	return be, target
 }
 
 // mergerfs reopens an already open file through /proc/self/fd, the only part of
 // proc in the sandbox.
 func TestMountReopensAnOpenFile(t *testing.T) {
-	target, _, _, _ := newMount(t, "vol-reopen")
+	_, target, _, _ := newMount(t, "vol-reopen")
 	path := filepath.Join(target, "rw.txt")
 	first, err := os.Open(path)
 	if err != nil {
@@ -324,20 +286,20 @@ func TestMountReopensAnOpenFile(t *testing.T) {
 func TestMountWithoutSandbox(t *testing.T) {
 	defer func(v bool) { useSandbox = v }(useSandbox)
 	useSandbox = false
-	target, stateDir, _, _ := newMount(t, "vol-nosandbox")
+	be, target, _, _ := newMount(t, "vol-nosandbox")
 
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
-	states, err := loadStates(stateDir)
-	if err != nil || len(states) != 1 || states[0].Branches != nil {
-		t.Fatalf("loadStates = %+v, %v; want one unsandboxed entry", states, err)
+	states, errs := be.states.LoadAll()
+	if len(errs) != 0 || len(states) != 1 || states[0].Branches != nil {
+		t.Fatalf("LoadAll = %+v, %v; want one unsandboxed entry", states, errs)
 	}
-	killDaemon(t, target)
-	reconcileOnce(context.Background(), stateDir, false)
+	killServing(t, target)
+	reconcileAll(context.Background(), be)
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
 }
 
 func TestMountSealsControlFile(t *testing.T) {
-	target, _, _, _ := newMount(t, "vol-seal")
+	_, target, _, _ := newMount(t, "vol-seal")
 	ctl := filepath.Join(target, controlFile)
 
 	if err := unix.Setxattr(ctl, "user.mergerfs.follow-symlinks", []byte("all"), 0); !errors.Is(err, unix.EROFS) {
@@ -351,32 +313,67 @@ func TestMountSealsControlFile(t *testing.T) {
 }
 
 func TestMountWritesState(t *testing.T) {
-	target, stateDir, _, _ := newMount(t, "vol-state")
+	be, target, _, _ := newMount(t, "vol-state")
 
-	states, err := loadStates(stateDir)
-	if err != nil {
-		t.Fatalf("loadStates: %v", err)
+	states, errs := be.states.LoadAll()
+	if len(errs) != 0 {
+		t.Fatalf("LoadAll: %v", errs)
 	}
 	if len(states) != 1 || states[0].Target != target {
-		t.Fatalf("loadStates = %+v, want one entry for %s", states, target)
+		t.Fatalf("LoadAll = %+v, want one entry for %s", states, target)
 	}
 
-	be := &mergerfsBackend{}
-	if err := be.Init(stateDir); err != nil {
-		t.Fatal(err)
-	}
 	if err := be.Unmount(context.Background(), "vol-state", target); err != nil {
 		t.Fatalf("Unmount: %v", err)
 	}
-	if states, err := loadStates(stateDir); err != nil || len(states) != 0 {
-		t.Fatalf("loadStates after Unmount = %v, %v; want empty, nil", states, err)
+	if states, errs := be.states.LoadAll(); len(errs) != 0 || len(states) != 0 {
+		t.Fatalf("LoadAll after Unmount = %v, %v; want empty, nil", states, errs)
+	}
+}
+
+// The daemon of a driver pod that was replaced lives on in its scope, named after the
+// volume as it always was, and the next pod finds it there.
+func TestRestartedDriverFindsTheDaemonInItsScope(t *testing.T) {
+	be, target, _, _ := newMount(t, "vol-restart")
+	if !be.scopes.Available() {
+		if os.Getenv("MOUNTTEST_SYSTEMD") != "" {
+			t.Fatal("MOUNTTEST_SYSTEMD is set but host systemd is unreachable")
+		}
+		t.Skip("no host systemd; see make test-mount-systemd")
+	}
+	pid := be.sup.PID("vol-restart")
+	cgroup, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cgroup"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cgroup), "union-csi-vol-restart.scope") {
+		t.Fatalf("cgroup of the daemon = %q, want it in union-csi-vol-restart.scope", cgroup)
+	}
+
+	next := &mergerfsBackend{}
+	if err := next.Init(be.stateDir); err != nil {
+		t.Fatal(err)
+	}
+	if got := next.sup.PID("vol-restart"); got == 0 {
+		t.Fatal("the next driver does not find the daemon through its scope")
+	}
+	before := daemonPIDs(t, target)
+	reconcileAll(context.Background(), next)
+	if got := daemonPIDs(t, target); !reflect.DeepEqual(got, before) {
+		t.Errorf("daemons = %v, want the unchanged %v", got, before)
+	}
+	if err := next.Unmount(context.Background(), "vol-restart", target); err != nil {
+		t.Fatal(err)
+	}
+	if states, errs := next.states.LoadAll(); len(errs) != 0 || len(states) != 0 {
+		t.Errorf("LoadAll after Unmount = %v, %v; want empty, nil", states, errs)
 	}
 }
 
 // A daemon holding the driver's stderr keeps the driver's container from
 // stopping.
 func TestDaemonDoesNotHoldDriverStderr(t *testing.T) {
-	target, _, _, _ := newMount(t, "vol-stdio")
+	_, target, _, _ := newMount(t, "vol-stdio")
 	var stderr unix.Stat_t
 	if err := unix.Fstat(int(os.Stderr.Fd()), &stderr); err != nil {
 		t.Fatal(err)
@@ -428,9 +425,9 @@ func daemonPIDs(t *testing.T, target string) []int {
 	return pids
 }
 
-// killDaemon SIGKILLs the mergerfs serving target, leaving the mount behind dead
+// killServing SIGKILLs the mergerfs serving target, leaving the mount behind dead
 // the way a daemon dying with its cgroup does.
-func killDaemon(t *testing.T, target string) {
+func killServing(t *testing.T, target string) {
 	t.Helper()
 	killed := daemonPIDs(t, target)
 	for _, pid := range killed {
@@ -452,14 +449,14 @@ func killDaemon(t *testing.T, target string) {
 }
 
 func TestReconcileRemountsADeadMount(t *testing.T) {
-	target, stateDir, _, _ := newMount(t, "vol-reconcile")
-	killDaemon(t, target)
+	be, target, _, _ := newMount(t, "vol-reconcile")
+	killServing(t, target)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	reconcileOnce(ctx, stateDir, false)
+	reconcileAll(ctx, be)
 
-	if !isFUSEMount(target) {
+	if !fusemount.IsFUSE(target) {
 		t.Fatal("target was not remounted by reconcileOnce")
 	}
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
@@ -475,8 +472,7 @@ func TestReconcileRemountsForAStaleBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	killFirst := fuseSource(t, src, makeSource(t, root, "first", map[string]string{"first.txt": "from-first"}))
-	target := mountSources(t, root, "vol-stale-branch", nil, src)
-	stateDir := filepath.Join(root, "state")
+	be, target := mountSources(t, root, "vol-stale-branch", nil, src)
 	before := daemonPIDs(t, target)
 	wantContent(t, filepath.Join(target, "first.txt"), "from-first")
 
@@ -491,13 +487,13 @@ func TestReconcileRemountsForAStaleBranch(t *testing.T) {
 	}
 	// Neither the union nor the host says anything is wrong, which is what makes the
 	// daemon's own view the only place to look.
-	if !isFUSEMount(target) {
+	if !fusemount.IsFUSE(target) {
 		t.Fatal("the union died with its branch")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	reconcileOnce(ctx, stateDir, false)
+	reconcileAll(ctx, be)
 
 	if got := daemonPIDs(t, target); reflect.DeepEqual(got, before) {
 		t.Fatalf("daemons = %v, unchanged: the stale branch did not get the union remounted", got)
@@ -514,8 +510,7 @@ func TestReconcileLeavesAHostDeadBranchAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	kill := fuseSource(t, src, makeSource(t, root, "first", map[string]string{"first.txt": "from-first"}))
-	target := mountSources(t, root, "vol-host-dead-branch", nil, src)
-	stateDir := filepath.Join(root, "state")
+	be, target := mountSources(t, root, "vol-host-dead-branch", nil, src)
 	before := daemonPIDs(t, target)
 
 	kill()
@@ -523,7 +518,7 @@ func TestReconcileLeavesAHostDeadBranchAlone(t *testing.T) {
 		t.Fatalf("statfs %s = %v, want ENOTCONN", src, err)
 	}
 
-	reconcileOnce(context.Background(), stateDir, false)
+	reconcileAll(context.Background(), be)
 
 	if got := daemonPIDs(t, target); !reflect.DeepEqual(got, before) {
 		t.Errorf("daemons = %v, want the unchanged %v: a remount cannot repair a branch that is dead on the host", got, before)
@@ -532,10 +527,10 @@ func TestReconcileLeavesAHostDeadBranchAlone(t *testing.T) {
 
 // A healthy branch must not get the union remounted every pass.
 func TestReconcileLeavesALiveBranchAlone(t *testing.T) {
-	target, stateDir, _, _ := newMount(t, "vol-live-branch")
+	be, target, _, _ := newMount(t, "vol-live-branch")
 	before := daemonPIDs(t, target)
 
-	reconcileOnce(context.Background(), stateDir, false)
+	reconcileAll(context.Background(), be)
 
 	if got := daemonPIDs(t, target); !reflect.DeepEqual(got, before) {
 		t.Errorf("daemons = %v, want the unchanged %v", got, before)
@@ -569,7 +564,7 @@ func fuseSource(t *testing.T, dir, backing string) func() {
 		kill()
 	})
 	deadline := time.Now().Add(30 * time.Second)
-	for !isFUSEMount(dir) {
+	for !fusemount.IsFUSE(dir) {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s did not become a FUSE mount", dir)
 		}
@@ -581,7 +576,7 @@ func fuseSource(t *testing.T, dir, backing string) func() {
 func waitRemounted(t *testing.T, target string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
-	for !isFUSEMount(target) || !sealed(target) {
+	for !fusemount.IsFUSE(target) || !sealed(target) {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s was not remounted within 10s", target)
 		}
@@ -592,15 +587,22 @@ func waitRemounted(t *testing.T, target string) {
 // Both remounts land well inside reconcileInterval, so the ticker cannot be what
 // drives them.
 func TestReconcileRemountsOnDaemonExit(t *testing.T) {
-	target, stateDir, _, _ := newMount(t, "vol-event")
+	be, target, _, _ := newMount(t, "vol-event")
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go reconcile(ctx, stateDir)
+	done := make(chan struct{})
+	go func() {
+		be.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
 
 	// The first remount may come from the loop's initial pass; the second only
 	// from the exit of the daemon that the first remount started.
 	for range 2 {
-		killDaemon(t, target)
+		killServing(t, target)
 		waitRemounted(t, target)
 	}
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
@@ -609,25 +611,25 @@ func TestReconcileRemountsOnDaemonExit(t *testing.T) {
 // A plain directory is a publish in progress or a rebooted node, and remounting
 // it would race kubelet.
 func TestReconcileLeavesAnUnmountedTargetAlone(t *testing.T) {
-	target, stateDir, _, _ := newMount(t, "vol-plain")
-	if err := fuseUnmount(target); err != nil {
+	be, target, _, _ := newMount(t, "vol-plain")
+	if err := fusemount.Unmount(target); err != nil {
 		t.Fatalf("fuseUnmount: %v", err)
 	}
 
-	reconcileOnce(context.Background(), stateDir, false)
+	reconcileAll(context.Background(), be)
 
-	if isFUSEMount(target) {
+	if fusemount.IsFUSE(target) {
 		t.Fatal("reconcileOnce remounted a plain directory")
 	}
-	if _, err := os.Stat(statePath(stateDir, "vol-plain")); err != nil {
+	if _, err := os.Stat(be.states.Path("vol-plain")); err != nil {
 		t.Fatalf("state was dropped: %v", err)
 	}
 }
 
 func TestReconcileDropsStateForARemovedTarget(t *testing.T) {
-	target, stateDir, _, _ := newMount(t, "vol-gone")
+	be, target, _, _ := newMount(t, "vol-gone")
 
-	if err := fuseUnmount(target); err != nil {
+	if err := fusemount.Unmount(target); err != nil {
 		t.Fatalf("fuseUnmount: %v", err)
 	}
 	// Kubelet removes the target directory on NodeUnpublishVolume; a state file
@@ -636,23 +638,22 @@ func TestReconcileDropsStateForARemovedTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reconcileOnce(context.Background(), stateDir, false)
+	reconcileAll(context.Background(), be)
 
-	if states, err := loadStates(stateDir); err != nil || len(states) != 0 {
-		t.Fatalf("loadStates = %v, %v; want empty, nil", states, err)
+	if states, errs := be.states.LoadAll(); len(errs) != 0 || len(states) != 0 {
+		t.Fatalf("LoadAll = %v, %v; want empty, nil", states, errs)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Errorf("stat target = %v, want not-exist", err)
 	}
 }
 
-func newShare(t *testing.T, target, stateDir, volumeID string) string {
+func newShare(t *testing.T, be *mergerfsBackend, target, volumeID string) string {
 	t.Helper()
 	view := filepath.Join(filepath.Dir(target), "view-"+volumeID)
 	if err := os.MkdirAll(view, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	be := &mergerfsBackend{stateDir: stateDir}
 	t.Cleanup(func() { _ = be.Unmount(context.Background(), volumeID, view) })
 	if err := be.Share(context.Background(), volumeID, target, view, false); err != nil {
 		t.Fatalf("Share: %v", err)
@@ -661,10 +662,10 @@ func newShare(t *testing.T, target, stateDir, volumeID string) string {
 }
 
 func TestShareBindsTheUnion(t *testing.T) {
-	target, stateDir, rw, _ := newMount(t, "vol-shared")
-	view := newShare(t, target, stateDir, "vol-shared-2")
+	be, target, rw, _ := newMount(t, "vol-shared")
+	view := newShare(t, be, target, "vol-shared-2")
 
-	if !isFUSEMount(view) {
+	if !fusemount.IsFUSE(view) {
 		t.Fatal("view is not a FUSE mount")
 	}
 	// The bind is recursive, so the seal on the control file comes along.
@@ -684,16 +685,16 @@ func TestShareBindsTheUnion(t *testing.T) {
 // A bind of a dead FUSE mount stays dead after its source is remounted, so the
 // same pass must bind it again.
 func TestReconcileRebindsASharedView(t *testing.T) {
-	target, stateDir, _, _ := newMount(t, "vol-rebind")
-	view := newShare(t, target, stateDir, "vol-rebind-2")
-	killDaemon(t, target)
+	be, target, _, _ := newMount(t, "vol-rebind")
+	view := newShare(t, be, target, "vol-rebind-2")
+	killServing(t, target)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	reconcileOnce(ctx, stateDir, false)
+	reconcileAll(ctx, be)
 
 	for _, p := range []string{target, view} {
-		if !isFUSEMount(p) || !sealed(p) {
+		if !fusemount.IsFUSE(p) || !sealed(p) {
 			t.Fatalf("%s was not brought back by reconcileOnce", p)
 		}
 		wantContent(t, filepath.Join(p, "ro.txt"), "from-ro")
@@ -701,18 +702,28 @@ func TestReconcileRebindsASharedView(t *testing.T) {
 }
 
 func TestReconcileDropsStateForARemovedShare(t *testing.T) {
-	target, stateDir, _, _ := newMount(t, "vol-share-gone")
-	view := newShare(t, target, stateDir, "vol-share-gone-2")
-	if err := fuseUnmount(view); err != nil {
+	be, target, _, _ := newMount(t, "vol-share-gone")
+	view := newShare(t, be, target, "vol-share-gone-2")
+	if err := fusemount.Unmount(view); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(view); err != nil {
 		t.Fatal(err)
 	}
 
-	reconcileOnce(context.Background(), stateDir, false)
+	reconcileAll(context.Background(), be)
 
-	if _, err := os.Stat(statePath(stateDir, "vol-share-gone-2")); !os.IsNotExist(err) {
+	if _, err := os.Stat(be.states.Path("vol-share-gone-2")); !os.IsNotExist(err) {
 		t.Fatalf("stat shared state = %v, want not-exist", err)
+	}
+}
+
+// reconcileAll runs one repair pass over every volume, as the supervisor does.
+func reconcileAll(ctx context.Context, be *mergerfsBackend) {
+	ids, _ := be.ids()
+	for _, id := range ids {
+		be.sup.Lock(id)
+		be.reconcile(ctx, id, false)
+		be.sup.Unlock(id)
 	}
 }

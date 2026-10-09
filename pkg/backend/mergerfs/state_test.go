@@ -9,9 +9,10 @@ import (
 
 func TestStateRoundTrip(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
+	store := newStateStore(dir)
 
-	if states, err := loadStates(dir); err != nil || len(states) != 0 {
-		t.Fatalf("loadStates on a missing dir = %v, %v; want empty, nil", states, err)
+	if states, errs := store.LoadAll(); len(errs) != 0 || len(states) != 0 {
+		t.Fatalf("LoadAll on a missing dir = %v, %v; want empty, nil", states, errs)
 	}
 
 	want := volumeState{
@@ -19,49 +20,46 @@ func TestStateRoundTrip(t *testing.T) {
 		Target:   "/var/lib/kubelet/pods/uid/volumes/kubernetes.io~csi/merged/mount",
 		Argv:     []string{"-f", "-o", "allow_other", "/a=RW:/b=RO", "/target"},
 	}
-	if err := saveState(dir, want); err != nil {
-		t.Fatalf("saveState: %v", err)
+	if err := store.Save(want.VolumeID, want); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
 
-	states, err := loadStates(dir)
-	if err != nil {
-		t.Fatalf("loadStates: %v", err)
-	}
-	if len(states) != 1 || !reflect.DeepEqual(states[0], want) {
-		t.Fatalf("loadStates = %+v, want [%+v]", states, want)
+	states, errs := store.LoadAll()
+	if len(errs) != 0 || len(states) != 1 || !reflect.DeepEqual(states[0], want) {
+		t.Fatalf("LoadAll = %+v, %v, want [%+v]", states, errs, want)
 	}
 
-	if err := removeState(dir, want.VolumeID); err != nil {
-		t.Fatalf("removeState: %v", err)
+	if err := store.Remove(want.VolumeID); err != nil {
+		t.Fatalf("Remove: %v", err)
 	}
-	if states, err := loadStates(dir); err != nil || len(states) != 0 {
-		t.Fatalf("loadStates after remove = %v, %v; want empty, nil", states, err)
+	if states, errs := store.LoadAll(); len(errs) != 0 || len(states) != 0 {
+		t.Fatalf("LoadAll after remove = %v, %v; want empty, nil", states, errs)
 	}
 	// Removing twice is not an error: NodeUnpublishVolume is retried.
-	if err := removeState(dir, want.VolumeID); err != nil {
-		t.Fatalf("removeState twice: %v", err)
+	if err := store.Remove(want.VolumeID); err != nil {
+		t.Fatalf("Remove twice: %v", err)
 	}
 }
 
-func TestLoadStatesIgnoresNonState(t *testing.T) {
+func TestLoadAllIgnoresNonState(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("junk"), 0o600); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"notes.txt", "csi-x.log", "csi-x.json.tmp"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("junk"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.Mkdir(filepath.Join(dir, "sub.json"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	states, err := loadStates(dir)
-	if err != nil || len(states) != 0 {
-		t.Fatalf("loadStates = %v, %v; want empty, nil", states, err)
+	states, errs := newStateStore(dir).LoadAll()
+	if len(errs) != 0 || len(states) != 0 {
+		t.Fatalf("LoadAll = %v, %v; want empty, nil", states, errs)
 	}
 }
 
 // One unreadable state must not keep the others from being repaired.
-func TestLoadStatesSkipsCorrupt(t *testing.T) {
+func TestLoadAllSkipsCorrupt(t *testing.T) {
 	dir := t.TempDir()
+	store := newStateStore(dir)
 	want := volumeState{VolumeID: "csi-good", Target: "/target", Argv: []string{"-f"}}
-	if err := saveState(dir, want); err != nil {
+	if err := store.Save(want.VolumeID, want); err != nil {
 		t.Fatal(err)
 	}
 	for name, data := range map[string]string{"empty.json": "", "junk.json": "{"} {
@@ -69,8 +67,8 @@ func TestLoadStatesSkipsCorrupt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	states, err := loadStates(dir)
-	if err != nil || len(states) != 1 || !reflect.DeepEqual(states[0], want) {
-		t.Fatalf("loadStates = %+v, %v; want [%+v], nil", states, err, want)
+	states, errs := store.LoadAll()
+	if len(errs) != 2 || len(states) != 1 || !reflect.DeepEqual(states[0], want) {
+		t.Fatalf("LoadAll = %+v, %v; want [%+v] and 2 errors", states, errs, want)
 	}
 }

@@ -6,17 +6,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Ruakij/fuse-sandbox/pkg/sandbox"
-	systemd "github.com/coreos/go-systemd/v22/dbus"
-	godbus "github.com/godbus/dbus/v5"
+	"github.com/Ruakij/go-csi-fuse-supervisor/pkg/daemon"
+	"github.com/Ruakij/go-csi-fuse-supervisor/pkg/fusemount"
+	"github.com/Ruakij/go-csi-fuse-supervisor/pkg/supervisor"
 	"golang.org/x/sys/unix"
 	"k8s.io/klog/v2"
 
@@ -27,14 +27,10 @@ const (
 	mergerfsBinary = "mergerfs"
 	controlFile    = ".mergerfs"
 
-	mountWaitTimeout  = 30 * time.Second
-	mountPollInterval = 100 * time.Millisecond
-	reconcileInterval = 30 * time.Second
-	minReconcileGap   = time.Second
+	mountWaitTimeout = 30 * time.Second
 
-	// fuseSuperMagic identifies a FUSE mount in statfs, which is what confirms
-	// mergerfs actually took over the target rather than merely starting.
-	fuseSuperMagic = 0x65735546
+	// daemonOutputTail is how much of a daemon's output goes to the log.
+	daemonOutputTail = 4096
 )
 
 // checkSandbox fails the driver's startup on a kernel the sandbox cannot run on,
@@ -46,7 +42,7 @@ func checkSandbox() error {
 	return nil
 }
 
-func mountUnion(ctx context.Context, spec backend.MountSpec, stateDir string) error {
+func (b *mergerfsBackend) mountUnion(ctx context.Context, spec backend.MountSpec) error {
 	st := volumeState{VolumeID: spec.VolumeID, Target: spec.Target}
 	// Taken before the sandbox rewrites the sources to its own paths.
 	for _, s := range spec.Sources {
@@ -66,12 +62,12 @@ func mountUnion(ctx context.Context, spec backend.MountSpec, stateDir string) er
 	// Written before the daemon starts: a crash between the two leaves a state
 	// file for a mount that never came up, which the reconcile loop repairs. The
 	// reverse order would leave a live mount nothing knows how to repair.
-	if err := saveState(stateDir, st); err != nil {
-		return err
+	if err := b.states.Save(spec.VolumeID, st); err != nil {
+		return fmt.Errorf("mergerfs: %w", err)
 	}
 
-	if err := startDaemon(ctx, st); err != nil {
-		_ = removeState(stateDir, spec.VolumeID)
+	if err := b.startDaemon(ctx, st); err != nil {
+		_ = b.removeState(spec.VolumeID)
 		return err
 	}
 	return nil
@@ -79,87 +75,93 @@ func mountUnion(ctx context.Context, spec backend.MountSpec, stateDir string) er
 
 // shareUnion records the view so reconcile can bind it again: a bind of a dead
 // FUSE mount stays dead after its source is remounted.
-func shareUnion(ctx context.Context, volumeID, source, target string, readOnly bool, stateDir string) error {
+func (b *mergerfsBackend) shareUnion(ctx context.Context, volumeID, source, target string, readOnly bool) error {
 	// The source is a FUSE mount a moment before its control file is sealed, and
 	// a bind taken in between would not carry the seal.
-	if err := waitServing(ctx, source); err != nil {
-		return err
+	if err := fusemount.WaitMounted(ctx, source, nil, mountWaitTimeout, b.serving); err != nil {
+		return fmt.Errorf("mergerfs: %s is not a live, sealed mount: %w", source, err)
 	}
 	st := volumeState{VolumeID: volumeID, Target: target, SharedFrom: source, ReadOnly: readOnly}
-	if err := saveState(stateDir, st); err != nil {
-		return err
+	if err := b.states.Save(volumeID, st); err != nil {
+		return fmt.Errorf("mergerfs: %w", err)
 	}
-	if err := backend.BindMount(source, target, readOnly); err != nil {
-		_ = removeState(stateDir, volumeID)
+	if err := fusemount.Bind(source, target, readOnly); err != nil {
+		_ = b.removeState(volumeID)
 		return fmt.Errorf("mergerfs: %w", err)
 	}
 	return nil
 }
 
 // startDaemon launches mergerfs and returns once the target is a live FUSE mount.
-func startDaemon(ctx context.Context, st volumeState) error {
-	volumeID, target := st.VolumeID, st.Target
+func (b *mergerfsBackend) startDaemon(ctx context.Context, st volumeState) error {
 	cmd, err := daemonCommand(st)
 	if err != nil {
 		return err
 	}
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	// A new session detaches the daemon from the driver's controlling terminal and
-	// signal group, so a driver shutdown does not take the mount with it.
-	cmd.SysProcAttr.Setsid = true
-	// Not the driver's own stderr: the container runtime reports the driver
-	// exited only once every holder of its stdio has closed it, and the daemon
-	// outlives the driver.
-	out, w, err := os.Pipe()
+	// Neither a pipe to the driver nor its stderr: a pipe breaks when the driver
+	// restarts, and the container runtime reports the driver exited only once every
+	// holder of its stdio has closed it, while the daemon outlives the driver.
+	out, err := os.OpenFile(b.daemonLog(st.VolumeID), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return fmt.Errorf("mergerfs: output pipe: %w", err)
+		return fmt.Errorf("mergerfs: open daemon log: %w", err)
 	}
-	cmd.Stdout, cmd.Stderr = w, w
+	defer out.Close()
+	cmd.Stdout, cmd.Stderr = out, out
 
-	err = cmd.Start()
-	_ = w.Close()
+	d, err := b.sup.Start(ctx, st.VolumeID, cmd, st.Target, supervisor.StartOptions{Timeout: mountWaitTimeout})
 	if err != nil {
-		_ = out.Close()
-		return fmt.Errorf("mergerfs: start: %w", err)
-	}
-	go func() {
-		_, _ = io.Copy(os.Stderr, out)
-		_ = out.Close()
-	}()
-	// Reaped only once adopted: until then a daemon that already died keeps its
-	// pid, which the scope would otherwise take from whatever process reuses it.
-	if systemdAvailable() {
-		if err := adoptIntoScope(ctx, scopeUnitName(volumeID), cmd.Process.Pid); err != nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			return err
+		if tail := b.daemonOutput(st.VolumeID); tail != "" {
+			klog.Errorf("mergerfs: output of the daemon for %s: %s", st.Target, tail)
 		}
-	}
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
-
-	if err := waitMounted(ctx, target, exited); err != nil {
-		_ = cmd.Process.Kill()
-		return err
+		return fmt.Errorf("mergerfs: %w", err)
 	}
 	if sealControl {
-		if err := sealControlFile(target); err != nil {
-			_ = fuseUnmount(target)
-			_ = cmd.Process.Kill()
+		if err := sealControlFile(st.Target); err != nil {
+			_ = fusemount.Unmount(st.Target)
+			killDaemon(d)
 			return err
 		}
 	}
-	// The branch probe reaches a daemon's mount namespace through its pid.
-	daemonPIDByVolume.Store(volumeID, cmd.Process.Pid)
-	klog.V(4).Infof("mergerfs: mounted %s (pid %d)", target, cmd.Process.Pid)
-	// Deliberately not bound to ctx, which belongs to the publish request: the
-	// daemon outlives it, and so must the watch on its exit.
-	go func() {
-		<-exited
-		requestReconcile()
-	}()
+	klog.V(4).Infof("mergerfs: mounted %s (pid %d)", st.Target, d.Pid())
+	return nil
+}
+
+// killDaemon kills a daemon with its process group, which it leads.
+func killDaemon(d *daemon.Daemon) {
+	select {
+	case <-d.Exited():
+	default:
+		_ = syscall.Kill(-d.Pid(), syscall.SIGKILL)
+	}
+}
+
+// daemonLog is where the output of the daemon of a volume goes, next to its state.
+func (b *mergerfsBackend) daemonLog(volumeID string) string {
+	return filepath.Join(b.stateDir, sanitizeUnitName(volumeID)+".log")
+}
+
+// daemonOutput returns the end of the output of the last daemon of a volume.
+func (b *mergerfsBackend) daemonOutput(volumeID string) string {
+	f, err := os.Open(b.daemonLog(volumeID))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	buf := make([]byte, min(fi.Size(), daemonOutputTail))
+	n, _ := f.ReadAt(buf, fi.Size()-int64(len(buf)))
+	return strings.TrimSpace(string(buf[:n]))
+}
+
+// removeState drops the record of a volume and the output of its daemon.
+func (b *mergerfsBackend) removeState(volumeID string) error {
+	_ = os.Remove(b.daemonLog(volumeID))
+	if err := b.states.Remove(volumeID); err != nil {
+		return fmt.Errorf("mergerfs: %w", err)
+	}
 	return nil
 }
 
@@ -202,148 +204,24 @@ func sealControlFile(target string) error {
 	return nil
 }
 
-func unmountUnion(ctx context.Context, volumeID, target, stateDir string) error {
-	if err := fuseUnmount(target); err != nil {
-		return err
+func (b *mergerfsBackend) unmountUnion(ctx context.Context, volumeID, target string) error {
+	if err := fusemount.Unmount(target); err != nil {
+		return fmt.Errorf("mergerfs: %w", err)
 	}
-	daemonPIDByVolume.Delete(volumeID)
-	if systemdAvailable() {
-		stopScope(ctx, scopeUnitName(volumeID))
+	// The daemon is usually gone already: unmounting makes mergerfs exit, and the
+	// empty scope goes with it. Stopping the scope is the belt to that braces.
+	if err := b.scopes.Stop(ctx, volumeID); err != nil {
+		klog.Warningf("mergerfs: %v", err)
 	}
-	return removeState(stateDir, volumeID)
+	return b.removeState(volumeID)
 }
 
-// systemdAvailable probes the host service manager once. Without it the daemon
-// stays in the driver's own cgroup and dies with the driver pod, which the
-// reconcile loop then has to repair.
-var systemdAvailable = sync.OnceValue(func() bool {
-	conn, err := systemd.NewSystemdConnectionContext(context.Background())
-	if err != nil {
-		klog.Warningf("mergerfs: host systemd is unreachable (%v); mounts will not survive a restart of this driver pod, "+
-			"and consumers holding open file descriptors across one will see ENOTCONN", err)
-		return false
-	}
-	conn.Close()
-	return true
-})
-
-// adoptIntoScope moves an already-running process into a transient host systemd
-// scope, the same trick systemd-run --scope and kubelet's own mount helpers use.
-// Once moved, the process is owned by host systemd rather than the container
-// cgroup, so it survives driver restart, upgrade and eviction.
-func adoptIntoScope(ctx context.Context, unit string, pid int) error {
-	conn, err := systemd.NewSystemdConnectionContext(ctx)
-	if err != nil {
-		return fmt.Errorf("mergerfs: connect to host systemd: %w", err)
-	}
-	defer conn.Close()
-
-	props := []systemd.Property{
-		systemd.PropDescription("union-csi-driver mergerfs mount"),
-		{Name: "PIDs", Value: godbus.MakeVariant([]uint32{uint32(pid)})},
-		{Name: "Delegate", Value: godbus.MakeVariant(true)},
-		// Let systemd garbage-collect the unit once the daemon exits, so a
-		// re-published volume can reuse the same deterministic name.
-		{Name: "CollectMode", Value: godbus.MakeVariant("inactive-or-failed")},
-	}
-
-	done := make(chan string, 1)
-	if _, err := conn.StartTransientUnitContext(ctx, unit, "replace", props, done); err != nil {
-		return fmt.Errorf("mergerfs: start transient scope %s: %w", unit, err)
-	}
-	select {
-	case result := <-done:
-		if result != "done" {
-			return fmt.Errorf("mergerfs: transient scope %s: %s", unit, result)
-		}
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func stopScope(ctx context.Context, unit string) {
-	conn, err := systemd.NewSystemdConnectionContext(ctx)
-	if err != nil {
-		klog.Warningf("mergerfs: connect to host systemd to stop %s: %v", unit, err)
-		return
-	}
-	defer conn.Close()
-
-	// The unit is usually gone already: unmounting makes mergerfs exit, and
-	// CollectMode reaps the empty scope. Stopping it is the belt to that braces.
-	if _, err := conn.StopUnitContext(ctx, unit, "replace", nil); err != nil {
-		klog.V(4).Infof("mergerfs: stop scope %s: %v", unit, err)
-	}
-}
-
-// waitMounted blocks until the target is a FUSE mount, the daemon exits, or the
-// timeout expires.
-func waitMounted(ctx context.Context, target string, exited <-chan error) error {
-	deadline := time.NewTimer(mountWaitTimeout)
-	defer deadline.Stop()
-	tick := time.NewTicker(mountPollInterval)
-	defer tick.Stop()
-
-	for {
-		if isFUSEMount(target) {
-			return nil
-		}
-		select {
-		case err := <-exited:
-			return fmt.Errorf("mergerfs: exited before mounting %s: %w", target, err)
-		case <-tick.C:
-		case <-deadline.C:
-			return fmt.Errorf("mergerfs: %s did not become a mountpoint within %s", target, mountWaitTimeout)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
-func waitServing(ctx context.Context, target string) error {
-	deadline := time.NewTimer(mountWaitTimeout)
-	defer deadline.Stop()
-	tick := time.NewTicker(mountPollInterval)
-	defer tick.Stop()
-
-	for !serving(target) {
-		select {
-		case <-tick.C:
-		case <-deadline.C:
-			return fmt.Errorf("mergerfs: %s is not a live, sealed mount after %s", target, mountWaitTimeout)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	return nil
-}
-
-func serving(target string) bool {
-	return isFUSEMount(target) && (!sealControl || sealed(target))
+// serving reports whether target is a live mount with its control file sealed.
+func (b *mergerfsBackend) serving(target string) bool {
+	return fusemount.IsFUSE(target) && (!sealControl || sealed(target))
 }
 
 func sealed(target string) bool {
 	var st unix.Statfs_t
 	return unix.Statfs(filepath.Join(target, controlFile), &st) == nil && st.Flags&unix.ST_RDONLY != 0
-}
-
-func isFUSEMount(target string) bool {
-	var st unix.Statfs_t
-	if err := unix.Statfs(target, &st); err != nil {
-		return false
-	}
-	return st.Type == fuseSuperMagic
-}
-
-// fuseUnmount detaches lazily, so it succeeds even when the daemon is dead or
-// consumers still hold files open.
-func fuseUnmount(target string) error {
-	switch err := unix.Unmount(target, unix.MNT_DETACH); err {
-	case nil, unix.EINVAL, unix.ENOENT:
-		// EINVAL: not a mountpoint. Unmount must tolerate being called twice.
-		return nil
-	default:
-		return fmt.Errorf("mergerfs: unmount %s: %w", target, err)
-	}
 }

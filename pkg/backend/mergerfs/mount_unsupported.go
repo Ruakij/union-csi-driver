@@ -12,18 +12,20 @@ import (
 
 var errUnsupported = errors.New("mergerfs: mounting is only supported on linux, not " + runtime.GOOS)
 
-func mountUnion(context.Context, backend.MountSpec, string) error {
+func (b *mergerfsBackend) mountUnion(context.Context, backend.MountSpec) error {
 	return errUnsupported
 }
 
-func shareUnion(context.Context, string, string, string, bool, string) error {
+func (b *mergerfsBackend) shareUnion(context.Context, string, string, string, bool) error {
 	return errUnsupported
 }
 
-func unmountUnion(context.Context, string, string, string) error {
+func (b *mergerfsBackend) unmountUnion(context.Context, string, string) error {
 	return errUnsupported
 }
 
-func reconcile(context.Context, string) {}
+func (b *mergerfsBackend) ids() ([]string, error) { return nil, nil }
+
+func (b *mergerfsBackend) reconcile(context.Context, string, bool) {}
 
 func checkSandbox() error { return nil }

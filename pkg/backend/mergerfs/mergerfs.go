@@ -5,8 +5,14 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"time"
 
-	"k8s.io/utils/keymutex"
+	"github.com/Ruakij/go-csi-fuse-supervisor/pkg/fusemount"
+	"github.com/Ruakij/go-csi-fuse-supervisor/pkg/scope"
+	"github.com/Ruakij/go-csi-fuse-supervisor/pkg/state"
+	"github.com/Ruakij/go-csi-fuse-supervisor/pkg/supervisor"
+	"k8s.io/klog/v2"
 
 	"github.com/Ruakij/union-csi-driver/pkg/backend"
 )
@@ -15,12 +21,10 @@ func init() {
 	backend.Register("mergerfs", New)
 }
 
-// volumeLocks serializes Mount, Unmount and the reconcile loop per volume, so a
-// remount cannot resurrect a volume that is being unpublished.
-var volumeLocks = keymutex.NewHashed(0)
-
-func lockVolume(id string)   { volumeLocks.LockKey(id) }
-func unlockVolume(id string) { _ = volumeLocks.UnlockKey(id) }
+// probeTimeout bounds one probe of a mount. A FUSE mount whose daemon is gone
+// answers with ENOTCONN at once, but one whose daemon is alive and stuck never
+// answers at all.
+const probeTimeout = 5 * time.Second
 
 var (
 	useSandbox  = true
@@ -37,6 +41,13 @@ func RegisterFlags(fs *flag.FlagSet) {
 
 type mergerfsBackend struct {
 	stateDir string
+	states   *state.Store[volumeState]
+	scopes   *scope.Manager
+	// sup starts the daemons and runs the reconcile passes. Mount, Share and
+	// Unmount hold its lock of the volume, so a remount cannot resurrect a volume
+	// that is being unpublished.
+	sup   *supervisor.Supervisor
+	probe *fusemount.Prober
 }
 
 // New constructs the mergerfs backend.
@@ -120,29 +131,47 @@ func (b *mergerfsBackend) Init(stateDir string) error {
 			return err
 		}
 	}
-	b.stateDir = stateDir
+	scopes, err := scope.New(context.Background(), scopeConfig())
+	if err != nil {
+		return fmt.Errorf("mergerfs: %w", err)
+	}
+	sup, err := supervisor.New(supervisor.Config{
+		Scope:     scopes,
+		IDs:       b.ids,
+		Reconcile: b.reconcile,
+		OnError:   func(err error) { klog.Errorf("mergerfs: reconcile: %v", err) },
+	})
+	if err != nil {
+		return fmt.Errorf("mergerfs: %w", err)
+	}
+	b.stateDir, b.states, b.scopes, b.sup = stateDir, newStateStore(stateDir), scopes, sup
+	b.probe = fusemount.NewProber(probeTimeout)
 	return nil
 }
 
-// Run remounts volumes whose daemon died, until ctx is done.
+// Run repairs volumes whose daemon died, until ctx is done.
 func (b *mergerfsBackend) Run(ctx context.Context) {
-	reconcile(ctx, b.stateDir)
+	if err := b.scopes.FellBack(); err != nil {
+		klog.Warningf("mergerfs: host systemd is unreachable (%v); mergerfs daemons die with this pod and are remounted when it restarts. "+
+			"Consumers holding open file descriptors across a restart keep seeing ENOTCONN until they reopen the file", err)
+	}
+	b.sup.Run(ctx)
 }
 
 func (b *mergerfsBackend) Mount(ctx context.Context, spec backend.MountSpec) error {
-	lockVolume(spec.VolumeID)
-	defer unlockVolume(spec.VolumeID)
-	return mountUnion(ctx, spec, b.stateDir)
+	b.sup.Lock(spec.VolumeID)
+	defer b.sup.Unlock(spec.VolumeID)
+	return b.mountUnion(ctx, spec)
 }
 
 func (b *mergerfsBackend) Share(ctx context.Context, volumeID, source, target string, readOnly bool) error {
-	lockVolume(volumeID)
-	defer unlockVolume(volumeID)
-	return shareUnion(ctx, volumeID, source, target, readOnly, b.stateDir)
+	b.sup.Lock(volumeID)
+	defer b.sup.Unlock(volumeID)
+	return b.shareUnion(ctx, volumeID, source, target, readOnly)
 }
 
 func (b *mergerfsBackend) Unmount(ctx context.Context, volumeID, target string) error {
-	lockVolume(volumeID)
-	defer unlockVolume(volumeID)
-	return unmountUnion(ctx, volumeID, target, b.stateDir)
+	b.sup.Lock(volumeID)
+	defer b.sup.Unlock(volumeID)
+	return b.unmountUnion(ctx, volumeID, target)
 }
