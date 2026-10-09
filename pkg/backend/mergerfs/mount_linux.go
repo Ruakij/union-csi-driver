@@ -44,15 +44,8 @@ func checkSandbox() error {
 
 func (b *mergerfsBackend) mountUnion(ctx context.Context, spec backend.MountSpec) error {
 	st := volumeState{VolumeID: spec.VolumeID, Target: spec.Target}
-	// Taken before the sandbox rewrites the sources to its own paths.
-	for _, s := range spec.Sources {
-		st.BranchPaths = append(st.BranchPaths, s.Path)
-	}
 	if useSandbox {
 		spec, st.Branches = sandboxed(spec)
-		for _, s := range spec.Sources {
-			st.SandboxBranches = append(st.SandboxBranches, s.Path)
-		}
 	}
 	var err error
 	if st.Argv, err = buildArgv(spec); err != nil {

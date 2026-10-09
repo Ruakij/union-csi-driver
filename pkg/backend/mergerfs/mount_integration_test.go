@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -204,7 +205,7 @@ func TestSandboxKeepsInheritedFilesOut(t *testing.T) {
 	if err := os.Symlink(fmt.Sprintf("/proc/self/fd/%d/key", fd), filepath.Join(src, "leak")); err != nil {
 		t.Fatal(err)
 	}
-	_, target := mountSources(t, root, "vol-inherit", map[string]string{"follow-symlinks": "all"}, src)
+	_, target := mountSources(t, root, "vol-inherit", map[string]string{"follow-symlinks": "all"}, modeRW, src)
 
 	// Not followed by the daemon, the link comes back as is, and the test's own fd
 	// would resolve it.
@@ -232,7 +233,7 @@ func TestSealIgnoresPlantedControlFile(t *testing.T) {
 			if err := plant(filepath.Join(src, controlFile), decoy); err != nil {
 				t.Fatal(err)
 			}
-			_, target := mountSources(t, root, "vol-plant-"+name, nil, src)
+			_, target := mountSources(t, root, "vol-plant-"+name, nil, modeRW, src)
 
 			if sealed(decoy) {
 				t.Error("sealed the planted link's destination")
@@ -245,8 +246,8 @@ func TestSealIgnoresPlantedControlFile(t *testing.T) {
 	}
 }
 
-// mountSources publishes a merge of RW sources under root and returns its backend and target.
-func mountSources(t *testing.T, root, volumeID string, options map[string]string, sources ...string) (*mergerfsBackend, string) {
+// mountSources publishes a merge of sources of one mode under root and returns its backend and target.
+func mountSources(t *testing.T, root, volumeID string, options map[string]string, mode string, sources ...string) (*mergerfsBackend, string) {
 	t.Helper()
 	target := filepath.Join(root, "target")
 	if err := os.Mkdir(target, 0o755); err != nil {
@@ -259,7 +260,7 @@ func mountSources(t *testing.T, root, volumeID string, options map[string]string
 	t.Cleanup(func() { _ = be.Unmount(context.Background(), volumeID, target) })
 	spec := backend.MountSpec{VolumeID: volumeID, Target: target, Options: options}
 	for _, s := range sources {
-		spec.Sources = append(spec.Sources, backend.Source{Path: s, Mode: modeRW})
+		spec.Sources = append(spec.Sources, backend.Source{Path: s, Mode: mode})
 	}
 	if err := be.Mount(context.Background(), spec); err != nil {
 		t.Fatalf("Mount: %v", err)
@@ -462,19 +463,21 @@ func TestReconcileRemountsADeadMount(t *testing.T) {
 	wantContent(t, filepath.Join(target, "ro.txt"), "from-ro")
 }
 
-// The incident this probe exists for: the source's FUSE daemon died and was
-// replaced at the same host path, so the host is healthy and only the daemon's own
-// clone of the branch is a dead superblock, which mergerfs skips without a word.
-func TestReconcileRemountsForAStaleBranch(t *testing.T) {
+// newStaleBranch publishes a union over a source served by a FUSE daemon of its
+// own, which then dies and is replaced at the same host path: the incident. The
+// host is healthy and only the daemon's own clone of the branch is a dead
+// superblock, which mergerfs skips without a word.
+func newStaleBranch(t *testing.T, volumeID, mode string) (be *mergerfsBackend, target, inner, src string) {
+	t.Helper()
 	root := sharedDir(t)
-	src := filepath.Join(root, "src")
+	src = filepath.Join(root, "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	killFirst := fuseSource(t, src, makeSource(t, root, "first", map[string]string{"first.txt": "from-first"}))
-	be, target := mountSources(t, root, "vol-stale-branch", nil, src)
-	before := daemonPIDs(t, target)
+	be, target = mountSources(t, root, volumeID, nil, mode, src)
 	wantContent(t, filepath.Join(target, "first.txt"), "from-first")
+	inner = filepath.Join("/proc", strconv.Itoa(be.sup.PID(volumeID)), "root", sandboxBranchDir, "0")
 
 	// What csi-mount-healer does: the dead mount goes, a fresh daemon takes the path.
 	killFirst()
@@ -485,23 +488,210 @@ func TestReconcileRemountsForAStaleBranch(t *testing.T) {
 	if err := unix.Statfs(src, &unix.Statfs_t{}); err != nil {
 		t.Fatalf("statfs %s = %v, want the healthy replacement", src, err)
 	}
+	if err := unix.Statfs(inner, &unix.Statfs_t{}); !errors.Is(err, unix.ENOTCONN) {
+		t.Fatalf("statfs %s = %v, want the daemon to hold the dead clone", inner, err)
+	}
 	// Neither the union nor the host says anything is wrong, which is what makes the
 	// daemon's own view the only place to look.
 	if !fusemount.IsFUSE(target) {
 		t.Fatal("the union died with its branch")
 	}
+	return be, target, inner, src
+}
+
+// eventually retries f for a few seconds: the kernel keeps the entries of the union
+// for cache.entry.
+func eventually(t *testing.T, f func() error) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		err := f()
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func hasContent(path, want string) error {
+	got, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if string(got) != want {
+		return fmt.Errorf("%s = %q, want %q", path, got, want)
+	}
+	return nil
+}
+
+// A daemon that serves is never replaced: the branch is cloned again inside its
+// namespace after staleThreshold passes, and a copy of the union that a container
+// holds keeps working throughout.
+func TestReconcileRepairsAStaleBranchInPlace(t *testing.T) {
+	be, target, inner, _ := newStaleBranch(t, "vol-stale-branch", modeRW)
+	before := daemonPIDs(t, target)
+
+	held := filepath.Join(filepath.Dir(target), "held")
+	if err := os.Mkdir(held, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := fusemount.Bind(target, held, false); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fusemount.Unmount(held) })
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	for pass := 1; pass < staleThreshold; pass++ {
+		reconcileAll(ctx, be)
+		if err := unix.Statfs(inner, &unix.Statfs_t{}); !errors.Is(err, unix.ENOTCONN) {
+			t.Fatalf("after pass %d: statfs %s = %v, want the branch left alone until pass %d", pass, inner, err, staleThreshold)
+		}
+	}
 	reconcileAll(ctx, be)
 
-	if got := daemonPIDs(t, target); reflect.DeepEqual(got, before) {
-		t.Fatalf("daemons = %v, unchanged: the stale branch did not get the union remounted", got)
+	if got := daemonPIDs(t, target); !reflect.DeepEqual(got, before) {
+		t.Fatalf("daemons = %v, want the unchanged %v: a serving daemon is not replaced", got, before)
 	}
-	wantContent(t, filepath.Join(target, "second.txt"), "from-second")
+	if err := unix.Statfs(inner, &unix.Statfs_t{}); err != nil {
+		t.Fatalf("statfs %s = %v, want the branch replaced", inner, err)
+	}
+	for _, p := range []string{target, held} {
+		eventually(t, func() error { return hasContent(filepath.Join(p, "second.txt"), "from-second") })
+	}
+	if len(be.stale) != 0 {
+		t.Errorf("counter = %v, want it cleared by the repair", be.stale)
+	}
 }
 
-// A branch that is dead on the host too cannot be repaired by a remount, so the
+// A read-only branch is replaced by a read-only clone.
+func TestReconcileRepairsAStaleBranchReadOnly(t *testing.T) {
+	be, target, inner, _ := newStaleBranch(t, "vol-stale-ro", modeRO)
+
+	for range staleThreshold {
+		reconcileAll(context.Background(), be)
+	}
+
+	eventually(t, func() error { return hasContent(filepath.Join(target, "second.txt"), "from-second") })
+	var st unix.Statfs_t
+	if err := unix.Statfs(inner, &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Flags&unix.ST_RDONLY == 0 {
+		t.Errorf("statfs %s flags = %#x, want ST_RDONLY", inner, st.Flags)
+	}
+}
+
+// detachInDaemon unmounts path in the mount namespace of the process pid.
+func detachInDaemon(t *testing.T, pid int, path string) {
+	t.Helper()
+	ns, err := os.Open(filepath.Join("/proc", strconv.Itoa(pid), "ns", "mnt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ns.Close()
+	done := make(chan error, 1)
+	go func() {
+		// Never unlocked: the thread ends with the goroutine, and nothing else runs
+		// in the namespace of the daemon.
+		runtime.LockOSThread()
+		if err := unix.Unshare(unix.CLONE_FS); err != nil {
+			done <- err
+			return
+		}
+		if err := unix.Setns(int(ns.Fd()), unix.CLONE_NEWNS); err != nil {
+			done <- err
+			return
+		}
+		done <- unix.Unmount(path, unix.MNT_DETACH)
+	}()
+	if err := <-done; err != nil {
+		t.Fatalf("detach %s in the namespace of %d: %v", path, pid, err)
+	}
+}
+
+func daemonMounts(t *testing.T, pid int) map[string]bool {
+	t.Helper()
+	f, err := os.Open(filepath.Join("/proc", strconv.Itoa(pid), "mountinfo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	points, err := mountPoints(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return points
+}
+
+// A replacement that fails after it detached the old mount leaves a directory that
+// answers, so the branch does not look dead: it is no mount of its own, though.
+func TestReconcileRepairsABranchThatIsNoMountInTheDaemon(t *testing.T) {
+	root := sharedDir(t)
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fuseSource(t, src, makeSource(t, root, "first", map[string]string{"first.txt": "from-first"}))
+	be, target := mountSources(t, root, "vol-no-mount", nil, modeRW, src)
+	pid := be.sup.PID("vol-no-mount")
+	inner := filepath.Join("/proc", strconv.Itoa(pid), "root", sandboxBranchDir, "0")
+	before := daemonPIDs(t, target)
+	wantContent(t, filepath.Join(target, "first.txt"), "from-first")
+	if !daemonMounts(t, pid)[sandboxBranchDir+"/0"] {
+		t.Fatalf("the sandbox did not bind the branch as a mount: %v", daemonMounts(t, pid))
+	}
+
+	detachInDaemon(t, pid, sandboxBranchDir+"/0")
+	if err := unix.Statfs(inner, &unix.Statfs_t{}); err != nil {
+		t.Fatalf("statfs %s = %v, want the empty directory to answer", inner, err)
+	}
+	if daemonMounts(t, pid)[sandboxBranchDir+"/0"] {
+		t.Fatal("the branch is still a mount in the daemon")
+	}
+
+	for pass := 1; pass < staleThreshold; pass++ {
+		reconcileAll(context.Background(), be)
+		if daemonMounts(t, pid)[sandboxBranchDir+"/0"] {
+			t.Fatalf("after pass %d: the branch was replaced before pass %d", pass, staleThreshold)
+		}
+	}
+	reconcileAll(context.Background(), be)
+
+	if !daemonMounts(t, pid)[sandboxBranchDir+"/0"] {
+		t.Fatal("the branch is still no mount in the daemon after the repair")
+	}
+	if got := daemonPIDs(t, target); !reflect.DeepEqual(got, before) {
+		t.Errorf("daemons = %v, want the unchanged %v", got, before)
+	}
+	eventually(t, func() error { return hasContent(filepath.Join(target, "first.txt"), "from-first") })
+}
+
+// A run of stale passes ends when the branch answers the daemon again, so a branch
+// that flaps is not repaired by passes that are far apart.
+func TestReconcileEndsTheRunOfAHealedBranch(t *testing.T) {
+	be, _, inner, src := newStaleBranch(t, "vol-stale-heal", modeRW)
+
+	reconcileAll(context.Background(), be)
+	reconcileAll(context.Background(), be)
+	if len(be.stale) != 1 {
+		t.Fatalf("counter = %v, want one run", be.stale)
+	}
+	if err := be.sup.ReplaceIn("vol-stale-heal", src, sandboxBranchDir+"/0", false); err != nil {
+		t.Fatal(err)
+	}
+	be.probe.Forget(inner)
+	reconcileAll(context.Background(), be)
+
+	if len(be.stale) != 0 {
+		t.Errorf("counter = %v, want the run ended", be.stale)
+	}
+}
+
+// A branch that is dead on the host too cannot be repaired by cloning it, so the
 // union is left serving what it still has rather than being disrupted every pass.
 func TestReconcileLeavesAHostDeadBranchAlone(t *testing.T) {
 	root := sharedDir(t)
@@ -510,7 +700,7 @@ func TestReconcileLeavesAHostDeadBranchAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	kill := fuseSource(t, src, makeSource(t, root, "first", map[string]string{"first.txt": "from-first"}))
-	be, target := mountSources(t, root, "vol-host-dead-branch", nil, src)
+	be, target := mountSources(t, root, "vol-host-dead-branch", nil, modeRW, src)
 	before := daemonPIDs(t, target)
 
 	kill()
@@ -518,10 +708,15 @@ func TestReconcileLeavesAHostDeadBranchAlone(t *testing.T) {
 		t.Fatalf("statfs %s = %v, want ENOTCONN", src, err)
 	}
 
-	reconcileAll(context.Background(), be)
+	for range staleThreshold + 1 {
+		reconcileAll(context.Background(), be)
+	}
 
 	if got := daemonPIDs(t, target); !reflect.DeepEqual(got, before) {
-		t.Errorf("daemons = %v, want the unchanged %v: a remount cannot repair a branch that is dead on the host", got, before)
+		t.Errorf("daemons = %v, want the unchanged %v", got, before)
+	}
+	if len(be.stale) != 0 {
+		t.Errorf("counter = %v, want no run for a branch that is dead on the host", be.stale)
 	}
 }
 

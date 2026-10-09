@@ -358,7 +358,21 @@ drops records of targets kubelet has removed. It learns of exits from its own ch
 processes and, with host systemd, from the daemon's scope stopping, which also covers
 daemons started by an earlier driver pod. A pass every 30s catches anything missed. The
 mount comes back at the same path, but file descriptors opened before it died keep
-returning `ENOTCONN` until the workload reopens them.
+returning `ENOTCONN` until the workload reopens them. The output of each daemon goes to
+`<volumeID>.log` next to its state file, and the end of it is logged when a daemon fails
+to start.
+
+A daemon that still serves is never stopped or replaced: the containers using the union
+hold copies of its mount, and a new daemon would leave them dead. Inside the daemon's
+sandbox every branch is a point-in-time copy of the mount of its source volume, so a
+source volume that is remounted on the host leaves the daemon holding the old,
+disconnected mount. mergerfs then serves the union without that branch's files and
+without an error. Each pass compares every branch as the daemon sees it with the host.
+A branch that is dead for the daemon, or no mount of its own there any more (what a
+failed replacement leaves behind), while it serves on the host, for 3 passes in a row,
+is cloned again at the same path inside the running daemon; the union and the copies of
+it in the containers stay as they are. A branch that is broken on the host too is only
+logged.
 
 Surviving daemons are never restarted for an upgrade, since that would break their
 open file descriptors: they keep the previous mergerfs version until their pod is

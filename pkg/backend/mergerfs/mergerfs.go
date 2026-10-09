@@ -48,6 +48,8 @@ type mergerfsBackend struct {
 	// that is being unpublished.
 	sup   *supervisor.Supervisor
 	probe *fusemount.Prober
+	// stale is used by the reconcile pass only, one volume at a time.
+	stale staleCounter
 }
 
 // New constructs the mergerfs backend.
@@ -146,6 +148,7 @@ func (b *mergerfsBackend) Init(stateDir string) error {
 	}
 	b.stateDir, b.states, b.scopes, b.sup = stateDir, newStateStore(stateDir), scopes, sup
 	b.probe = fusemount.NewProber(probeTimeout)
+	b.stale = staleCounter{}
 	return nil
 }
 

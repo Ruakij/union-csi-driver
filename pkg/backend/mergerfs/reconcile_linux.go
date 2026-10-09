@@ -21,6 +21,9 @@ func (b *mergerfsBackend) ids() ([]string, error) {
 	for i, st := range states {
 		ids[i] = st.VolumeID
 	}
+	// Called at the start of each pass, so the counters of volumes that are gone
+	// do not pile up.
+	b.stale.retain(ids)
 	return ids, errors.Join(errs...)
 }
 
@@ -41,13 +44,9 @@ func (b *mergerfsBackend) reconcile(ctx context.Context, id string, logLive bool
 		if logLive {
 			klog.Infof("mergerfs: found live mount %s", st.Target)
 		}
-		// mergerfs skips a branch it cannot reach without an error anywhere: the union
-		// keeps answering, with that branch's files simply absent. Only the branches as
-		// the daemon has them say so.
-		if stale := b.staleBranch(st); stale != "" {
-			klog.Warningf("mergerfs: remounting %s to pick up branch %s again", st.Target, stale)
-			b.remountUnion(ctx, st)
-		}
+		// A serving daemon is never stopped or replaced, whatever else is wrong: its
+		// consumers hold copies of its mount that a new daemon would leave dead.
+		b.repairBranches(st)
 	case fusemount.Gone:
 		// Kubelet removed the target: the volume is gone, and so is the reason to
 		// keep its state.
