@@ -372,7 +372,9 @@ A branch that is dead for the daemon, or no mount of its own there any more (wha
 failed replacement leaves behind), while it serves on the host, for 3 passes in a row,
 is cloned again at the same path inside the running daemon; the union and the copies of
 it in the containers stay as they are. A branch that is broken on the host too is only
-logged.
+logged. A union that does not answer within 5s, because a branch or the daemon is
+stuck, is left alone as well: the daemon is alive and may recover, and a remount would
+cut off its consumers for good. Only a mount whose daemon is gone is remounted.
 
 Surviving daemons are never restarted for an upgrade, since that would break their
 open file descriptors: they keep the previous mergerfs version until their pod is

@@ -720,6 +720,64 @@ func TestReconcileLeavesAHostDeadBranchAlone(t *testing.T) {
 	}
 }
 
+// A union whose branch is stuck does not answer either. The pass must not wait for
+// it, and must not remount a daemon that is alive: it recovers with its source.
+func TestReconcileLeavesAHungUnionAlone(t *testing.T) {
+	root := sharedDir(t)
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fuseSource(t, src, makeSource(t, root, "first", map[string]string{"first.txt": "from-first"}))
+	be, target := mountSources(t, root, "vol-hung", nil, modeRW, src)
+	be.probe = fusemount.NewProber(500 * time.Millisecond)
+	before := daemonPIDs(t, target)
+
+	// Found before it stops: looking for the daemon of a mount that does not answer
+	// would not return either.
+	srcPIDs := daemonPIDs(t, src)
+	for _, pid := range srcPIDs {
+		if err := unix.Kill(pid, unix.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = unix.Kill(pid, unix.SIGCONT) })
+	}
+
+	passed := make(chan struct{})
+	go func() {
+		reconcileAll(context.Background(), be)
+		close(passed)
+	}()
+	select {
+	case <-passed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the pass did not return while the union does not answer")
+	}
+	if _, err := be.probe.Probe(target); !errors.Is(err, fusemount.ErrHung) {
+		t.Fatalf("probe of the union = %v, want it hung", err)
+	}
+	if _, err := os.Stat(be.states.Path("vol-hung")); err != nil {
+		t.Errorf("state was dropped: %v", err)
+	}
+
+	for _, pid := range srcPIDs {
+		if err := unix.Kill(pid, unix.SIGCONT); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eventually(t, func() error {
+		if state, err := be.probe.Probe(target); state != fusemount.Live || err != nil {
+			return fmt.Errorf("probe of the union = %v, %w, want it live", state, err)
+		}
+		return nil
+	})
+	reconcileAll(context.Background(), be)
+	if got := daemonPIDs(t, target); !reflect.DeepEqual(got, before) {
+		t.Errorf("daemons = %v, want the unchanged %v: a daemon that is alive is never replaced", got, before)
+	}
+	wantContent(t, filepath.Join(target, "first.txt"), "from-first")
+}
+
 // A healthy branch must not get the union remounted every pass.
 func TestReconcileLeavesALiveBranchAlone(t *testing.T) {
 	be, target, _, _ := newMount(t, "vol-live-branch")

@@ -201,6 +201,8 @@ func (b *mergerfsBackend) unmountUnion(ctx context.Context, volumeID, target str
 	if err := fusemount.Unmount(target); err != nil {
 		return fmt.Errorf("mergerfs: %w", err)
 	}
+	// A probe stuck on the old mount is not one of the next at this path.
+	b.probe.Forget(target)
 	// The daemon is usually gone already: unmounting makes mergerfs exit, and the
 	// empty scope goes with it. Stopping the scope is the belt to that braces.
 	if err := b.scopes.Stop(ctx, volumeID); err != nil {
@@ -211,7 +213,8 @@ func (b *mergerfsBackend) unmountUnion(ctx context.Context, volumeID, target str
 
 // serving reports whether target is a live mount with its control file sealed.
 func (b *mergerfsBackend) serving(target string) bool {
-	return fusemount.IsFUSE(target) && (!sealControl || sealed(target))
+	state, err := b.probe.Probe(target)
+	return state == fusemount.Live && err == nil && (!sealControl || sealed(target))
 }
 
 func sealed(target string) bool {

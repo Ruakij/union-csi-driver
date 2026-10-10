@@ -39,7 +39,19 @@ func (b *mergerfsBackend) reconcile(ctx context.Context, id string, logLive bool
 		return
 	}
 
-	switch fusemount.Status(st.Target) {
+	// A daemon that is alive but stuck never answers, which a plain statfs would
+	// carry into this pass for good, holding the lock of the volume.
+	state, err := b.probe.Probe(st.Target)
+	if errors.Is(err, fusemount.ErrHung) {
+		// Its daemon, if it has one, is alive and may recover, and a remount would cut
+		// off its consumers for good. A branch that does not answer the daemon can be
+		// what it is stuck on, and cloning that again is safe.
+		klog.Warningf("mergerfs: %s does not answer, leaving it alone", st.Target)
+		b.repairBranches(st)
+		return
+	}
+
+	switch state {
 	case fusemount.Live:
 		if logLive {
 			klog.Infof("mergerfs: found live mount %s", st.Target)
@@ -62,7 +74,11 @@ func (b *mergerfsBackend) reconcile(ctx context.Context, id string, logLive bool
 		b.remountUnion(ctx, st)
 	default:
 		// A plain directory is either a mount still being set up, or a node that
-		// rebooted, where kubelet republishes.
+		// rebooted, where kubelet republishes. Anything else says nothing about the
+		// daemon, and a remount would not help.
+		if err != nil {
+			klog.Warningf("mergerfs: %s: %v, leaving it alone", st.Target, err)
+		}
 	}
 }
 
@@ -71,6 +87,7 @@ func (b *mergerfsBackend) remountUnion(ctx context.Context, st volumeState) {
 		klog.Errorf("mergerfs: reconcile: %v", err)
 		return
 	}
+	b.probe.Forget(st.Target)
 	if err := b.scopes.Stop(ctx, st.VolumeID); err != nil {
 		klog.Errorf("mergerfs: reconcile: %v", err)
 		return
@@ -90,6 +107,7 @@ func (b *mergerfsBackend) rebindShared(st volumeState) {
 		klog.Errorf("mergerfs: reconcile: %v", err)
 		return
 	}
+	b.probe.Forget(st.Target)
 	if err := fusemount.Bind(st.SharedFrom, st.Target, st.ReadOnly); err != nil {
 		klog.Errorf("mergerfs: reconcile: rebind %s: %v", st.Target, err)
 	}
