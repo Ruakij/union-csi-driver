@@ -22,8 +22,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - run: gofmt -l cmd internal pkg | tee /dev/stderr | (! read)
@@ -35,15 +35,15 @@ jobs:
       # token carrying the workflow scope.
       - id: lint-version
         run: echo "version=$(cat hack/golangci-lint.version)" >> "$GITHUB_OUTPUT"
-      - uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: ${{ steps.lint-version.outputs.version }}
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - run: go test -race ./...
@@ -53,12 +53,12 @@ jobs:
     # Fuzzing unchanged code finds less each time; the daily run is for CVEs.
     if: github.event_name != 'schedule'
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       # Fuzzing is cumulative: each run starts from the corpus of the ones before.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build/fuzz
           key: ${{ github.job }}-${{ github.run_id }}
@@ -66,7 +66,7 @@ jobs:
       - run: make fuzz
       # Commit a failing input to testdata/fuzz to keep it as a regression test.
       - if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ github.job }}-failing-input
           path: "**/testdata/fuzz/"
@@ -74,11 +74,11 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Reachability-aware, so it only fails on vulnerabilities we actually call.
       # It installs its own Go, hence no setup-go step; go-version-input must be
       # cleared or it collides with go-version-file.
-      - uses: golang/govulncheck-action@v1.1.0
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         with:
           repo-checkout: false
           go-version-file: go.mod
@@ -86,7 +86,7 @@ jobs:
       # Source-tree scan: go.sum against the vulnerability databases trivy tracks,
       # plus committed secrets. Misconfig scanning is off: a node CSI driver is
       # privileged and hostPath-mounted by design, and every hit would be a waiver.
-      - uses: aquasecurity/trivy-action@v0.36.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -101,7 +101,7 @@ jobs:
   mount:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: test -c /dev/fuse || (echo "runner has no /dev/fuse" >&2; exit 1)
       - run: make test-mount
       - run: make test-mount-systemd
@@ -111,11 +111,11 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: helm/kind-action@v1
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           install_only: true
           version: v0.33.0
@@ -124,17 +124,17 @@ jobs:
   helm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: azure/setup-helm@v5
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: helm lint charts/union-csi-driver
       - name: helm template (both backends)
         run: |
           helm template ci charts/union-csi-driver --set backend=mergerfs > /dev/null
           helm template ci charts/union-csi-driver --set backend=overlay > /dev/null
           helm template ci charts/union-csi-driver --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy > /dev/null
-      - uses: helm/chart-testing-action@v2
+      - uses: helm/chart-testing-action@720270857a28afd41e2426521a7801db09e9b510 # v2.9.0
       # The released chart version comes from the git tag, not Chart.yaml, so
       # demanding a version bump per chart change would be asking for a no-op edit.
       - run: ct lint --target-branch ${{ github.event.repository.default_branch }} --chart-dirs charts --check-version-increment=false
@@ -142,9 +142,9 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/build-push-action@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: false
@@ -152,7 +152,7 @@ jobs:
           tags: union-csi-driver:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - uses: aquasecurity/trivy-action@v0.36.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: union-csi-driver:ci
           format: table
