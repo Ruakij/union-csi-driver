@@ -40,7 +40,12 @@ func TestSanity(t *testing.T) {
 	stop := make(chan os.Signal, 1)
 	done := make(chan error)
 	go func() { done <- d.Run(stop) }()
-	t.Cleanup(func() { stop <- syscall.SIGTERM; <-done })
+	t.Cleanup(func() {
+		stop <- syscall.SIGTERM
+		if err := <-done; err != nil {
+			t.Errorf("Run: %v", err)
+		}
+	})
 
 	cfg := sanity.NewTestConfig()
 	cfg.Address = sock
