@@ -1,22 +1,22 @@
 module github.com/Ruakij/union-csi-driver
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/Ruakij/fuse-sandbox v0.3.0
-	github.com/Ruakij/go-csi-fuse-supervisor v0.1.0
+	github.com/Ruakij/go-csi-fuse-supervisor v0.1.1
 	github.com/container-storage-interface/spec v1.13.0
 	github.com/kubernetes-csi/csi-lib-utils v0.25.0
 	github.com/kubernetes-csi/csi-test/v5 v5.6.0
-	github.com/onsi/ginkgo/v2 v2.33.0
+	github.com/onsi/ginkgo/v2 v2.33.1
 	github.com/onsi/gomega v1.44.0
 	golang.org/x/sys v0.49.0
-	google.golang.org/grpc v1.83.2
-	k8s.io/api v0.37.0
+	google.golang.org/grpc v1.84.0
+	k8s.io/api v0.37.1
 	k8s.io/apimachinery v0.37.1
 	k8s.io/client-go v1.5.2
 	k8s.io/klog/v2 v2.140.0
-	k8s.io/mount-utils v0.37.0
+	k8s.io/mount-utils v0.37.1
 )
 
 require (
@@ -41,7 +41,7 @@ require (
 	github.com/go-openapi/swag/typeutils v0.29.1 // indirect
 	github.com/go-openapi/swag/yamlutils v0.29.1 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
-	github.com/godbus/dbus/v5 v5.2.2 // indirect
+	github.com/godbus/dbus/v5 v5.2.4 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
