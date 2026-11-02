@@ -30,6 +30,11 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "union-csi-driver.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}
@@ -100,9 +105,10 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 5
+          {{- with .Values.securityContext }}
           securityContext:
-            privileged: true
-            readOnlyRootFilesystem: true
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -139,13 +145,10 @@ spec:
             - --csi-address=/csi/csi.sock
             - --kubelet-registration-path={{ include "union-csi-driver.socketDir" . }}/csi.sock
             - -v={{ .Values.logLevel }}
+          {{- with .Values.registrar.securityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
-            seccompProfile:
-              type: RuntimeDefault
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -162,13 +165,10 @@ spec:
             - --csi-address=/csi/csi.sock
             - --http-endpoint=:9808
             - -v={{ .Values.logLevel }}
+          {{- with .Values.livenessProbe.securityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
-            seccompProfile:
-              type: RuntimeDefault
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi

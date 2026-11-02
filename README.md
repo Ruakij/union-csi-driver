@@ -260,6 +260,10 @@ process. These are always computed on the node.
 | `priorityClassName`           | `system-node-critical`                                          | Priority class of the DaemonSet pods.                                                                |
 | `tolerations`                 | tolerate everything                                             | DaemonSet tolerations.                                                                               |
 | `nodeSelector`, `affinity`    | `{}`                                                            | DaemonSet scheduling constraints.                                                                    |
+| `podSecurityContext`          | `RuntimeDefault` seccomp                                        | Pod-level security context of the DaemonSet pods.                                                    |
+| `securityContext`             | privileged, read-only root                                      | Security context of the driver container.                                                            |
+| `registrar.securityContext`, `livenessProbe.securityContext` | all restrictions but non-root                                   | Security context of the sidecars.                                                                    |
+| `automountServiceAccountToken` | `true`                                                          | The driver reads pods, PVCs and PVs through the API.                                                 |
 | `resources`                   | requests `10m` CPU, `32Mi` memory                               | Driver container resources. No limits by default: throttling the driver stalls every mount.          |
 | `podAnnotations`, `podLabels` | `{}`                                                            | Extra metadata on the DaemonSet pods.                                                                |
 | `updateStrategy`              | `RollingUpdate`                                                 | DaemonSet update strategy.                                                                           |

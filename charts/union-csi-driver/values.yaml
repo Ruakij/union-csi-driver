@@ -20,6 +20,17 @@ registrar:
     requests:
       cpu: 5m
       memory: 16Mi
+  # Sidecars take every restriction except runAsNonRoot: the images run as root
+  # (USER 0) and the registrar creates its socket in, and the probe connects to the
+  # driver socket in, root-owned hostPath directories. A non-root run would need
+  # runAsUser/runAsGroup plus a matching mode on those directories.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+    seccompProfile:
+      type: RuntimeDefault
 
 # Sidecar serving /healthz for the driver container's liveness probe, by calling
 # the driver's CSI Probe over its socket.
@@ -32,6 +43,14 @@ livenessProbe:
     requests:
       cpu: 5m
       memory: 16Mi
+  # Same restrictions and exception as the registrar.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+    seccompProfile:
+      type: RuntimeDefault
 
 # Presets: k3s and RKE2 use /var/lib/kubelet by default but k3s installs that as a
 # symlink to /var/lib/rancher/k3s/agent/kubelet; MicroK8s uses
@@ -116,6 +135,30 @@ resources:
   requests:
     cpu: 10m
     memory: 32Mi
+# Pod level, so it applies to all three containers. runAsNonRoot is not set: the
+# driver runs as root to mount and the sidecar images run as root as well.
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+# Driver container. The kernel mount and unmount calls need CAP_SYS_ADMIN and, for
+# mergerfs, /dev/fuse (a hostPath mount, which a device plugin or a CDI device
+# could replace). privileged also lifts the runtime seccomp profile and the
+# capability drop, and is incompatible with allowPrivilegeEscalation: false, so
+# neither is set here. The root filesystem is read-only; per-volume state lives in
+# a hostPath below the kubelet plugins directory.
+# Narrower set, untested: capabilities [SYS_ADMIN] instead of privileged, the
+# /dev/fuse device from a device plugin, allowPrivilegeEscalation: false, and
+# whatever else the mergerfs sandbox (namespaces, pivot_root) needs. Blocker: the
+# API server only admits mountPropagation: Bidirectional on privileged containers,
+# which the pods-dir and plugins-dir mounts use, so this needs another way to
+# propagate the union mount back to kubelet.
+securityContext:
+  privileged: true
+  readOnlyRootFilesystem: true
+# The driver reads pods, PVCs and PVs through the API (see rbac.yaml), so the
+# token must be mounted. The sidecars share it though they never use it; giving
+# it to the driver container alone needs a projected volume mounted there only.
+automountServiceAccountToken: true
 podAnnotations: {}
 podLabels: {}
 updateStrategy:

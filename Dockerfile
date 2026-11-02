@@ -14,7 +14,7 @@
 
 # Cross-compiling from the build platform, so a multi-arch build needs no
 # emulated toolchain.
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS build
 ARG TARGETARCH
 ARG version=dev
 WORKDIR /src
@@ -22,11 +22,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
-    go build -ldflags "-X main.version=${version}" -o /out/union-csi-driver ./cmd/union-csi-driver
+    go build -trimpath -ldflags "-s -w -X main.version=${version}" -o /out/union-csi-driver ./cmd/union-csi-driver
 
-# Alpine has no mergerfs package, so take the upstream static build. Pinned by
-# digest because it is fetched from outside the package manager.
-FROM alpine AS mergerfs
+# Alpine has no mergerfs package, so take the upstream static build, checked
+# against the sha256 in hack/mergerfs.pin. The base images are pinned by digest so
+# a rebuild cannot pick up a different toolchain.
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS mergerfs
 ARG TARGETARCH
 COPY hack/mergerfs.pin /tmp/mergerfs.pin
 RUN set -eu; \
