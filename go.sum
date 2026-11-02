@@ -1,7 +1,7 @@
 github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAwZ/2OOE=
 github.com/Masterminds/semver/v3 v3.5.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
-github.com/Ruakij/fuse-sandbox v0.3.1 h1:Z1vEp6Zg2N4Qnq5Ayt3a9MdFN0mrHOHbzwSWyTKBhIM=
-github.com/Ruakij/fuse-sandbox v0.3.1/go.mod h1:dhU2dFm8sesvx170t1r5PugVD5ByU/3rlThlFVZFz08=
+github.com/Ruakij/fuse-sandbox v0.3.2 h1:JwjBA/6wANCJzQxa+gcIioaunv00sq202JvkCvOKOk4=
+github.com/Ruakij/fuse-sandbox v0.3.2/go.mod h1:OGH3uSSOgkV2/wYn3iEud3q2hJPaLg6OlaM+POKW5cg=
 github.com/Ruakij/go-csi-fuse-supervisor v0.1.1 h1:e0jU6nz+M8Otk3TrUl7UR4y8xk/9toI8tjoh9c/h1UQ=
 github.com/Ruakij/go-csi-fuse-supervisor v0.1.1/go.mod h1:1t2nl5tVFgdTQR0Hi2ZtyRbSoxRfbnjIq5BqsQJRkXc=
 github.com/container-storage-interface/spec v1.13.0 h1:6ja3nYoACisewTPAAZkJ1pbf4+1ehhvt9Z/nYgWGHGw=
