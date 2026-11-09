@@ -3,12 +3,12 @@ module github.com/Ruakij/union-csi-driver
 go 1.27.3
 
 require (
-	github.com/Ruakij/fuse-sandbox v0.3.1
+	github.com/Ruakij/fuse-sandbox v0.3.2
 	github.com/Ruakij/go-csi-fuse-supervisor v0.1.1
 	github.com/container-storage-interface/spec v1.13.0
 	github.com/kubernetes-csi/csi-lib-utils v0.25.0
 	github.com/kubernetes-csi/csi-test/v5 v5.6.0
-	github.com/onsi/ginkgo/v2 v2.33.1
+	github.com/onsi/ginkgo/v2 v2.34.0
 	github.com/onsi/gomega v1.44.0
 	golang.org/x/sys v0.49.0
 	google.golang.org/grpc v1.85.0
